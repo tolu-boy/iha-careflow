@@ -32,158 +32,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-
-type PatientStatus = "Active" | "Intake Pending" | "Care Review" | "Inactive";
-type RiskLevel = "Low" | "Medium" | "High";
-type InsuranceStatus = "Verified" | "Pending" | "Missing Info";
-
-type Patient = {
-  id: string;
-  name: string;
-  age: number;
-  dob: string;
-  gender: string;
-  phone: string;
-  email: string;
-  emergencyContact: string;
-  status: PatientStatus;
-  risk: RiskLevel;
-  provider: string;
-  reason: string;
-  nextAppointment: string;
-  insurancePlan: string;
-  memberId: string;
-  insuranceStatus: InsuranceStatus;
-  onboardingComplete: boolean;
-  consentSigned: boolean;
-  openNotes: number;
-  balance: string;
-  lastMessage: string;
-  carePlan: string;
-};
-
-const initialPatients: Patient[] = [
-  {
-    id: "john-doe",
-    name: "John Doe",
-    age: 34,
-    dob: "1992-03-18",
-    gender: "Male",
-    phone: "(555) 014-2100",
-    email: "john.doe@email.com",
-    emergencyContact: "Maria Doe - (555) 019-8821",
-    status: "Active",
-    risk: "Medium",
-    provider: "Dr Smith",
-    reason: "Anxiety and sleep disruption",
-    nextAppointment: "May 14, 10:00 AM",
-    insurancePlan: "Aetna",
-    memberId: "AET-47291",
-    insuranceStatus: "Verified",
-    onboardingComplete: true,
-    consentSigned: true,
-    openNotes: 1,
-    balance: "$35.00",
-    lastMessage: "Sleep symptoms updated this morning.",
-    carePlan: "Weekly therapy with medication monitoring.",
-  },
-  {
-    id: "sarah-kim",
-    name: "Sarah Kim",
-    age: 29,
-    dob: "1997-10-04",
-    gender: "Female",
-    phone: "(555) 018-4430",
-    email: "sarah.kim@email.com",
-    emergencyContact: "Daniel Kim - (555) 013-0021",
-    status: "Intake Pending",
-    risk: "Low",
-    provider: "Dr Lee",
-    reason: "Medication follow-up",
-    nextAppointment: "May 14, 11:30 AM",
-    insurancePlan: "BlueCross BlueShield",
-    memberId: "BCBS-88421",
-    insuranceStatus: "Pending",
-    onboardingComplete: false,
-    consentSigned: true,
-    openNotes: 0,
-    balance: "$0.00",
-    lastMessage: "Asked to confirm appointment time.",
-    carePlan: "Intake review before provider assignment.",
-  },
-  {
-    id: "mike-johnson",
-    name: "Mike Johnson",
-    age: 42,
-    dob: "1984-06-22",
-    gender: "Male",
-    phone: "(555) 016-9944",
-    email: "mike.johnson@email.com",
-    emergencyContact: "Alicia Johnson - (555) 011-4490",
-    status: "Care Review",
-    risk: "High",
-    provider: "Dr Smith",
-    reason: "Sleep disturbance and fatigue",
-    nextAppointment: "May 14, 10:00 AM",
-    insurancePlan: "Cigna",
-    memberId: "CIG-11820",
-    insuranceStatus: "Verified",
-    onboardingComplete: true,
-    consentSigned: true,
-    openNotes: 2,
-    balance: "$60.00 est.",
-    lastMessage: "Lab results uploaded.",
-    carePlan: "Review labs, sleep history, and medication response.",
-  },
-  {
-    id: "avery-johnson",
-    name: "Avery Johnson",
-    age: 35,
-    dob: "1991-04-18",
-    gender: "Female",
-    phone: "(555) 015-2218",
-    email: "avery.johnson@email.com",
-    emergencyContact: "Chris Johnson - (555) 015-7720",
-    status: "Active",
-    risk: "Low",
-    provider: "Dr Ross",
-    reason: "Medication check",
-    nextAppointment: "May 15, 1:00 PM",
-    insurancePlan: "Aetna",
-    memberId: "AET-53177",
-    insuranceStatus: "Verified",
-    onboardingComplete: true,
-    consentSigned: true,
-    openNotes: 0,
-    balance: "$0.00",
-    lastMessage: "No new messages.",
-    carePlan: "Monthly medication management.",
-  },
-  {
-    id: "Jordan-rivera",
-    name: "Jordan Rivera",
-    age: 30,
-    dob: "1996-12-11",
-    gender: "Non-binary",
-    phone: "(555) 010-6811",
-    email: "jordan.rivera@email.com",
-    emergencyContact: "Pat Rivera - (555) 012-3308",
-    status: "Intake Pending",
-    risk: "Medium",
-    provider: "Dr Lee",
-    reason: "Initial consult",
-    nextAppointment: "Not scheduled",
-    insurancePlan: "UnitedHealthcare",
-    memberId: "Missing",
-    insuranceStatus: "Missing Info",
-    onboardingComplete: true,
-    consentSigned: false,
-    openNotes: 0,
-    balance: "Unknown",
-    lastMessage: "Needs insurance card upload.",
-    carePlan: "Complete billing readiness before scheduling.",
-  },
-];
+import {
+  type InsuranceStatus,
+  type Patient,
+  type PatientStatus,
+  type RiskLevel,
+  useCareFlowStore,
+} from "@/stores/careflow-store";
 
 const statusStyles: Record<PatientStatus, string> = {
   Active: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -213,9 +68,10 @@ const statuses: PatientStatus[] = [
 const risks: RiskLevel[] = ["Low", "Medium", "High"];
 
 export default function PatientsPage() {
-  const patients = initialPatients;
-  const [activePatientId, setActivePatientId] = React.useState(
-    initialPatients[0].id,
+  const patients = useCareFlowStore((state) => state.patients);
+  const activePatientId = useCareFlowStore((state) => state.activePatientId);
+  const setActivePatientId = useCareFlowStore(
+    (state) => state.setActivePatientId,
   );
   const [search, setSearch] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState("All Statuses");

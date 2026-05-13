@@ -43,138 +43,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-
-type DoctorStatus = "Available" | "In Session" | "Out Today" | "Credentialing";
-
-type Doctor = {
-  id: string;
-  name: string;
-  title: string;
-  specialty: string;
-  license: string;
-  npi: string;
-  email: string;
-  phone: string;
-  status: DoctorStatus;
-  todayAppointments: number;
-  availableSlots: number;
-  openNotes: number;
-  nextAvailable: string;
-  panelCount: number;
-  highRiskPanel: number;
-  capacity: number;
-  location: string;
-  networkStatus: string;
-  upcoming: string[];
-  focus: string;
-};
-
-const initialDoctors: Doctor[] = [
-  {
-    id: "dr-smith",
-    name: "Dr Smith",
-    title: "Clinical Psychologist",
-    specialty: "Therapy",
-    license: "PSY-48291",
-    npi: "1847291044",
-    email: "dr.smith@ihacareflow.com",
-    phone: "(555) 018-1100",
-    status: "In Session",
-    todayAppointments: 7,
-    availableSlots: 2,
-    openNotes: 3,
-    nextAvailable: "Today 2:30 PM",
-    panelCount: 64,
-    highRiskPanel: 6,
-    capacity: 78,
-    location: "Main Clinic",
-    networkStatus: "Aetna, Cigna, BCBS",
-    upcoming: [
-      "10:00 AM - John Doe - Therapy",
-      "11:30 AM - Mike Johnson - Lab review",
-      "2:30 PM - Open slot",
-    ],
-    focus: "Anxiety, sleep disruption, trauma-informed therapy.",
-  },
-  {
-    id: "dr-lee",
-    name: "Dr Lee",
-    title: "Psychiatric Nurse Practitioner",
-    specialty: "Medication Management",
-    license: "NP-77312",
-    npi: "1729304818",
-    email: "dr.lee@ihacareflow.com",
-    phone: "(555) 019-2220",
-    status: "Available",
-    todayAppointments: 5,
-    availableSlots: 3,
-    openNotes: 1,
-    nextAvailable: "Today 1:00 PM",
-    panelCount: 51,
-    highRiskPanel: 3,
-    capacity: 62,
-    location: "Telehealth",
-    networkStatus: "Aetna, UnitedHealthcare",
-    upcoming: [
-      "9:00 AM - Intake review",
-      "11:30 AM - Sarah Kim - Intake",
-      "1:00 PM - Open slot",
-    ],
-    focus: "Medication follow-up, mood symptoms, intake review.",
-  },
-  {
-    id: "dr-ross",
-    name: "Dr Ross",
-    title: "Integrative Medicine Physician",
-    specialty: "Integrative Medicine",
-    license: "MD-61028",
-    npi: "1882930175",
-    email: "dr.ross@ihacareflow.com",
-    phone: "(555) 016-7300",
-    status: "Available",
-    todayAppointments: 4,
-    availableSlots: 4,
-    openNotes: 0,
-    nextAvailable: "Tomorrow 10:00 AM",
-    panelCount: 43,
-    highRiskPanel: 2,
-    capacity: 55,
-    location: "Main Clinic",
-    networkStatus: "BCBS, Self-pay",
-    upcoming: [
-      "1:00 PM - Avery Johnson - Follow-up",
-      "3:00 PM - Taylor Smith - Follow-up",
-      "4:00 PM - Open slot",
-    ],
-    focus: "Whole-person care, labs, fatigue, medication review.",
-  },
-  {
-    id: "dr-maria-chen",
-    name: "Dr Maria Chen",
-    title: "Psychiatrist",
-    specialty: "Psychiatry",
-    license: "MD-90441",
-    npi: "1902847291",
-    email: "maria.chen@ihacareflow.com",
-    phone: "(555) 014-6120",
-    status: "Credentialing",
-    todayAppointments: 0,
-    availableSlots: 0,
-    openNotes: 0,
-    nextAvailable: "Pending credentialing",
-    panelCount: 0,
-    highRiskPanel: 0,
-    capacity: 0,
-    location: "Pending assignment",
-    networkStatus: "Credentialing in progress",
-    upcoming: [
-      "Credentialing review",
-      "Insurance panel setup",
-      "Schedule template pending",
-    ],
-    focus: "Psychiatry and medication management.",
-  },
-];
+import {
+  type Doctor,
+  type DoctorStatus,
+  useCareFlowStore,
+} from "@/stores/careflow-store";
 
 const statusStyles: Record<DoctorStatus, string> = {
   Available: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -198,10 +71,12 @@ const statuses: DoctorStatus[] = [
 ];
 
 export default function DoctorsPage() {
-  const [doctors, setDoctors] = React.useState(initialDoctors);
-  const [activeDoctorId, setActiveDoctorId] = React.useState(
-    initialDoctors[0].id,
+  const doctors = useCareFlowStore((state) => state.doctors);
+  const activeDoctorId = useCareFlowStore((state) => state.activeDoctorId);
+  const setActiveDoctorId = useCareFlowStore(
+    (state) => state.setActiveDoctorId,
   );
+  const addDoctor = useCareFlowStore((state) => state.addDoctor);
   const [search, setSearch] = React.useState("");
   const [specialtyFilter, setSpecialtyFilter] = React.useState("All Specialties");
   const [statusFilter, setStatusFilter] = React.useState("All Statuses");
@@ -275,37 +150,7 @@ export default function DoctorsPage() {
   function createDoctor() {
     if (!draft.name.trim()) return;
 
-    const doctor: Doctor = {
-      id: `doctor-${Date.now()}`,
-      name: draft.name.trim(),
-      title: draft.title || "Provider",
-      specialty: draft.specialty,
-      license: draft.license || "Pending",
-      npi: draft.npi || "Pending",
-      email: draft.email || "Not entered",
-      phone: draft.phone || "Not entered",
-      status: draft.status,
-      todayAppointments: 0,
-      availableSlots: draft.status === "Credentialing" ? 0 : 4,
-      openNotes: 0,
-      nextAvailable:
-        draft.status === "Credentialing"
-          ? "Pending credentialing"
-          : "Schedule template needed",
-      panelCount: 0,
-      highRiskPanel: 0,
-      capacity: 0,
-      location: "Pending assignment",
-      networkStatus:
-        draft.status === "Credentialing"
-          ? "Credentialing in progress"
-          : "Network setup needed",
-      upcoming: ["Schedule template needed", "Panel assignment pending"],
-      focus: `${draft.specialty} care.`,
-    };
-
-    setDoctors((current) => [doctor, ...current]);
-    setActiveDoctorId(doctor.id);
+    addDoctor(draft);
     setDialogOpen(false);
     setDraft({
       name: "",

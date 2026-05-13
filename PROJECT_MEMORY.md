@@ -4,9 +4,9 @@ Last updated: 2026-05-13
 
 ## Project Overview
 
-`iha-careflow` is a Next.js 16 App Router application for Integrative Healthcare Alliance care operations. The current priority is UI-first. There is no backend or real auth wired yet.
+`iha-careflow` is a Next.js 16 App Router application for Integrative Healthcare Alliance care operations. The current priority is UI-first. Firebase has been initialized, but real auth and Firestore persistence are not wired yet.
 
-The app was adapted from a shadcn-style admin dashboard reference, but Convex and Clerk were intentionally removed. All current workflow data is static/local component state.
+The app was adapted from a shadcn-style admin dashboard reference, but Convex and Clerk were intentionally removed. Patient/provider directory data now lives in a Zustand store; other workflow data is still static/local component state.
 
 ## Local Dev Notes
 
@@ -23,6 +23,8 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
 ## App Architecture
 
 - Framework: Next.js `16.2.6`, React `19.2.4`, App Router.
+- Firebase SDK: initialized for app/Auth/Firestore/Storage/Analytics.
+- Global state: Zustand store in `src/stores/careflow-store.ts`.
 - Styling: Tailwind CSS v4 via `src/app/globals.css`.
 - Component style: shadcn/ui-style primitives under `src/components/ui`.
 - Icons: `@tabler/icons-react` mostly, plus some `lucide-react` inside shadcn primitives.
@@ -210,6 +212,20 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
 - `src/components/auth-panel.tsx`
   - Shared login/register panel.
 
+- `src/components/firebase-provider.tsx`
+  - Client provider mounted in `src/app/layout.tsx`.
+  - Initializes Firebase Analytics only in the browser.
+
+- `src/lib/firebase.ts`
+  - Firebase app configuration for project `iha-careflow`.
+  - Exports `firebaseApp`, `auth`, `db`, `storage`, and `getFirebaseAnalytics`.
+  - Uses a guarded analytics initializer so server rendering/builds do not call `getAnalytics`.
+
+- `src/stores/careflow-store.ts`
+  - Zustand store for global patient/provider directory state.
+  - Exports shared `Patient`, `Doctor`, status, risk, and insurance types.
+  - Stores active patient/provider IDs and supports adding providers from the Doctors page.
+
 - `src/components/app-sidebar.tsx`
   - Sidebar navigation and app brand.
   - Current links:
@@ -244,7 +260,7 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
 
 ## Firestore Collections
 
-Firestore is not implemented yet. Recommended collection design for the backend phase:
+Firebase is initialized, but Firestore collection reads/writes are not implemented yet. Recommended collection design for the backend phase:
 
 - `users`
   - Admin/staff/provider profiles.
@@ -351,6 +367,13 @@ Cross-page relationships already represented in UI:
 
 - Next.js project set up with shadcn-style admin shell.
 - Convex and Clerk references removed from copied reference UI.
+- Firebase initialized:
+  - Firebase App
+  - Auth export
+  - Firestore export
+  - Storage export
+  - browser-safe Analytics initializer
+- Zustand global state added for patient/provider directory data.
 - Login/register UI routes.
 - Dashboard command center.
 - Patient onboarding intake form with live summary.
@@ -397,8 +420,8 @@ Cross-page relationships already represented in UI:
 
 ### Backend/Auth
 
-- Choose backend and auth approach. User mentioned Firestore in memory request, so Firebase Auth + Firestore is likely next.
-- Implement Firebase project setup and environment variables.
+- Firebase SDK is installed and initialized.
+- Move Firebase config to `NEXT_PUBLIC_*` environment variables before production.
 - Implement real auth for login/register.
 - Protect `/admin/*` routes.
 - Implement RBAC in frontend route guards and Firestore rules.
@@ -406,7 +429,8 @@ Cross-page relationships already represented in UI:
 
 ### Data Layer
 
-- Replace static arrays/local state with Firestore reads/writes.
+- Replace static arrays/local state and Zustand seed data with Firestore reads/writes.
+- Hydrate Zustand from Firestore collections.
 - Add loading, error, empty, and permission states.
 - Add validation schemas for intake, billing, notes, messages, scheduling.
 - Add server actions or API routes if needed.
