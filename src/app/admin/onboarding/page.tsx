@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import {
-  IconArrowRight,
   IconClipboardCheck,
   IconFileText,
   IconHeartbeat,
@@ -31,6 +30,9 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { auth, db } from "@/lib/firebase";
+import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { toast } from "sonner";
 
 const symptomOptions = [
   "Anxiety",
@@ -84,6 +86,8 @@ const initialForm: IntakeForm = {
 export default function PatientOnboardingPage() {
   const [form, setForm] = React.useState<IntakeForm>(initialForm);
   const [symptoms, setSymptoms] = React.useState<string[]>([]);
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [saveError, setSaveError] = React.useState("");
 
   const completedSections = React.useMemo(() => {
     const sections = [
@@ -114,6 +118,42 @@ export default function PatientOnboardingPage() {
         ? [...current, symptom]
         : current.filter((item) => item !== symptom),
     );
+  }
+
+  async function saveDraft() {
+    setSaveError("");
+    setIsSaving(true);
+
+    try {
+      await addDoc(collection(db, "patients"), {
+        ...form,
+        symptoms,
+        status: "Intake Draft",
+        source: "patient-onboarding",
+        onboardingComplete: false,
+        createdBy: auth.currentUser?.uid ?? null,
+        createdByEmail: auth.currentUser?.email ?? null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      setForm(initialForm);
+      setSymptoms([]);
+      toast.success("Patient data saved", {
+        description:
+          "The patient profile has been  saved .",
+      });
+    } catch {
+      const message =
+        "Unable to save this patient data. Please check Firebase permissions and try again.";
+
+      setSaveError(message);
+      toast.error("Patient data was not saved", {
+        description: message,
+      });
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -154,7 +194,10 @@ export default function PatientOnboardingPage() {
       <div className="grid grid-cols-1 gap-6 px-4 xl:grid-cols-[1fr_380px] lg:px-6">
         <form
           className="grid gap-5"
-          onSubmit={(event) => event.preventDefault()}
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveDraft();
+          }}
         >
           <Card className="rounded-lg">
             <CardHeader>
@@ -205,10 +248,7 @@ export default function PatientOnboardingPage() {
                   <SelectContent>
                     <SelectItem value="Female">Female</SelectItem>
                     <SelectItem value="Male">Male</SelectItem>
-                    <SelectItem value="Non-binary">Non-binary</SelectItem>
-                    <SelectItem value="Prefer not to say">
-                      Prefer not to say
-                    </SelectItem>
+  
                   </SelectContent>
                 </Select>
               </div>
@@ -442,12 +482,16 @@ export default function PatientOnboardingPage() {
           </Card>
 
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <Button variant="outline" type="button">
-              Save draft
-            </Button>
-            <Button type="submit">
-              Review intake summary
-              <IconArrowRight />
+            {saveError ? (
+              <div
+                role="alert"
+                className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 sm:mr-auto"
+              >
+                {saveError}
+              </div>
+            ) : null}
+            <Button type="submit" disabled={isSaving}>
+              {isSaving ? "Saving patient..." : "Save patient data"}
             </Button>
           </div>
         </form>

@@ -1,5 +1,16 @@
+"use client";
+
 import Link from "next/link";
+import * as React from "react";
+import { useRouter } from "next/navigation";
 import { IconArrowRight, IconHeartbeat, IconShieldLock } from "@tabler/icons-react";
+import {
+  createUserWithEmailAndPassword,
+  signOut,
+  signInWithEmailAndPassword,
+  updateProfile,
+} from "firebase/auth";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +23,9 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { buildAuthUser } from "@/lib/auth-profile";
+import { auth, db } from "@/lib/firebase";
+import { useAuthStore } from "@/stores/auth-store";
 
 type AuthPanelProps = {
   mode: "login" | "register";
@@ -19,6 +33,94 @@ type AuthPanelProps = {
 
 export function AuthPanel({ mode }: AuthPanelProps) {
   const isRegister = mode === "register";
+  const router = useRouter();
+  const authStatus = useAuthStore((state) => state.status);
+  const setAuthUser = useAuthStore((state) => state.setUser);
+  const [name, setName] = React.useState("");
+  const [email, setEmail] = React.useState("");
+  const [password, setPassword] = React.useState("");
+  const [confirmPassword, setConfirmPassword] = React.useState("");
+  const [error, setError] = React.useState("");
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
+
+  React.useEffect(() => {
+    if (authStatus === "authenticated") {
+      router.replace("/admin/dashboard");
+    }
+  }, [authStatus, router]);
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+
+    if (isRegister && password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    if (isRegister && !name.trim()) {
+      setError("Enter the admin name for this account.");
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+
+      if (isRegister) {
+        const fullName = name.trim();
+        const credential = await createUserWithEmailAndPassword(
+          auth,
+          email,
+          password,
+        );
+
+        await updateProfile(credential.user, {
+          displayName: fullName,
+        });
+
+        const userProfile = {
+          uid: credential.user.uid,
+          userId: credential.user.uid,
+          fullName,
+          displayName: fullName,
+          email: credential.user.email ?? email,
+          role: "admin",
+          active: true,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+
+        await setDoc(doc(db, "users", credential.user.uid), userProfile);
+
+        setAuthUser(buildAuthUser(credential.user, userProfile));
+      } else {
+        const credential = await signInWithEmailAndPassword(
+          auth,
+          email,
+          password,
+        );
+        const userSnapshot = await getDoc(doc(db, "users", credential.user.uid));
+
+        setAuthUser(
+          buildAuthUser(
+            credential.user,
+            userSnapshot.exists() ? userSnapshot.data() : undefined,
+          ),
+        );
+      }
+
+      router.replace("/admin/dashboard");
+    } catch (authError) {
+      if (isRegister && auth.currentUser) {
+        await signOut(auth);
+        setAuthUser(null);
+      }
+
+      setError(getAuthErrorMessage(authError));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
   return (
     <main className="grid min-h-svh bg-background lg:grid-cols-[1fr_0.82fr]">
@@ -48,11 +150,18 @@ export function AuthPanel({ mode }: AuthPanelProps) {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <form className="grid gap-4">
+              <form className="grid gap-4" onSubmit={handleSubmit}>
                 {isRegister ? (
                   <div className="grid gap-2">
                     <Label htmlFor="name">Full name</Label>
-                    <Input id="name" placeholder="Care team member" />
+                    <Input
+                      id="name"
+                      placeholder="Care team member"
+                      value={name}
+                      onChange={(event) => setName(event.target.value)}
+                      autoComplete="name"
+                      required
+                    />
                   </div>
                 ) : null}
                 <div className="grid gap-2">
@@ -62,6 +171,9 @@ export function AuthPanel({ mode }: AuthPanelProps) {
                     type="email"
                     placeholder="admin@integrativehealthcarealliance.com"
                     autoComplete="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    required
                   />
                 </div>
                 <div className="grid gap-2">
@@ -80,6 +192,10 @@ export function AuthPanel({ mode }: AuthPanelProps) {
                     id="password"
                     type="password"
                     autoComplete={isRegister ? "new-password" : "current-password"}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    required
+                    minLength={6}
                   />
                 </div>
                 {isRegister ? (
@@ -89,14 +205,29 @@ export function AuthPanel({ mode }: AuthPanelProps) {
                       id="confirm-password"
                       type="password"
                       autoComplete="new-password"
+                      value={confirmPassword}
+                      onChange={(event) =>
+                        setConfirmPassword(event.target.value)
+                      }
+                      required
+                      minLength={6}
                     />
                   </div>
                 ) : null}
-                <Button asChild className="mt-2 w-full">
-                  <Link href="/admin/dashboard">
-                    {isRegister ? "Create account" : "Sign in"}
-                    <IconArrowRight />
-                  </Link>
+                {error ? (
+                  <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {error}
+                  </div>
+                ) : null}
+                <Button className="mt-2 w-full" disabled={isSubmitting}>
+                  {isSubmitting
+                    ? isRegister
+                      ? "Creating account..."
+                      : "Signing in..."
+                    : isRegister
+                      ? "Create account"
+                      : "Sign in"}
+                  <IconArrowRight />
                 </Button>
               </form>
             </CardContent>
@@ -155,4 +286,29 @@ export function AuthPanel({ mode }: AuthPanelProps) {
       </aside>
     </main>
   );
+}
+
+function getAuthErrorMessage(error: unknown) {
+  const code =
+    typeof error === "object" && error && "code" in error
+      ? String(error.code)
+      : "";
+
+  switch (code) {
+    case "auth/email-already-in-use":
+      return "An account already exists with that email.";
+    case "auth/invalid-credential":
+    case "auth/user-not-found":
+    case "auth/wrong-password":
+      return "Email or password is incorrect.";
+    case "auth/weak-password":
+      return "Password should be at least 6 characters.";
+    case "auth/operation-not-allowed":
+      return "Email/password sign-in is not enabled in Firebase yet.";
+    case "permission-denied":
+    case "firestore/permission-denied":
+      return "Firestore denied the profile save/read. Update and deploy the Firestore rules first.";
+    default:
+      return "Unable to complete authentication. Please try again.";
+  }
 }

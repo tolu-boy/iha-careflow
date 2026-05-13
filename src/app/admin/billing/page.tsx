@@ -5,6 +5,7 @@ import {
   IconAlertTriangle,
   IconChecklist,
   IconCreditCard,
+  IconDatabaseImport,
   IconDownload,
   IconFileInvoice,
   IconId,
@@ -13,6 +14,15 @@ import {
   IconSearch,
   IconShieldCheck,
 } from "@tabler/icons-react";
+import {
+  addDoc,
+  collection,
+  doc,
+  onSnapshot,
+  serverTimestamp,
+  updateDoc,
+} from "firebase/firestore";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -51,11 +61,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { auth, db } from "@/lib/firebase";
 
 type BillingStatus = "Verified" | "Pending" | "Missing Info";
 type StatusFilter = BillingStatus | "All";
 
 type BillingRecord = {
+  id: string;
   patient: string;
   dateOfBirth: string;
   provider: string;
@@ -67,13 +79,14 @@ type BillingRecord = {
   invoice: string;
   cardStatus: string;
   notes: string;
+  reminderSentAt?: string;
   breakdown: {
     label: string;
     amount: string;
   }[];
 };
 
-const records: BillingRecord[] = [
+const demoRecords: Omit<BillingRecord, "id">[] = [
   {
     patient: "Avery Johnson",
     dateOfBirth: "1991-04-18",
@@ -166,43 +179,42 @@ const records: BillingRecord[] = [
   },
 ];
 
-const summaryCards = [
-  {
-    label: "Verified coverage",
-    value: "24",
-    note: "Ready for upcoming visits",
-    icon: IconShieldCheck,
-  },
-  {
-    label: "Pending review",
-    value: "8",
-    note: "Eligibility or benefits in progress",
-    icon: IconChecklist,
-  },
-  {
-    label: "Missing info",
-    value: "3",
-    note: "Needs card, member ID, or subscriber detail",
-    icon: IconAlertTriangle,
-  },
-  {
-    label: "Open balance",
-    value: "$2,410",
-    note: "Estimated patient responsibility",
-    icon: IconReceipt2,
-  },
-];
-
 const statusStyles: Record<BillingStatus, string> = {
   Verified: "border-emerald-200 bg-emerald-50 text-emerald-700",
   Pending: "border-amber-200 bg-amber-50 text-amber-700",
   "Missing Info": "border-red-200 bg-red-50 text-red-700",
 };
 
+const currencyPattern = /-?\$?[\d,]+(?:\.\d{2})?/;
+
 export default function BillingPage() {
+  const [records, setRecords] = React.useState<BillingRecord[]>([]);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [isSeeding, setIsSeeding] = React.useState(false);
   const [search, setSearch] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("All");
-  const [sentReminders, setSentReminders] = React.useState<string[]>([]);
+
+  React.useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, "billingRecords"),
+      (snapshot) => {
+        const nextRecords = snapshot.docs
+          .map((snapshotDoc) => toBillingRecord(snapshotDoc.id, snapshotDoc.data()))
+          .sort((first, second) => first.patient.localeCompare(second.patient));
+
+        setRecords(nextRecords);
+        setIsLoading(false);
+      },
+      () => {
+        setIsLoading(false);
+        toast.error("Unable to load billing records", {
+          description: "Check Firebase permissions for billingRecords.",
+        });
+      },
+    );
+
+    return unsubscribe;
+  }, []);
 
   const filteredRecords = React.useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -218,12 +230,89 @@ export default function BillingPage() {
 
       return matchesSearch && matchesStatus;
     });
-  }, [search, statusFilter]);
+  }, [records, search, statusFilter]);
 
-  function sendReminder(patient: string) {
-    setSentReminders((current) =>
-      current.includes(patient) ? current : [...current, patient],
+  const summaryCards = React.useMemo(() => {
+    const verified = records.filter((record) => record.status === "Verified").length;
+    const pending = records.filter((record) => record.status === "Pending").length;
+    const missing = records.filter(
+      (record) => record.status === "Missing Info",
+    ).length;
+    const openBalance = records.reduce(
+      (total, record) => total + parseCurrency(record.balance),
+      0,
     );
+
+    return [
+      {
+        label: "Verified coverage",
+        value: String(verified),
+        note: "Ready for upcoming visits",
+        icon: IconShieldCheck,
+      },
+      {
+        label: "Pending review",
+        value: String(pending),
+        note: "Eligibility or benefits in progress",
+        icon: IconChecklist,
+      },
+      {
+        label: "Missing info",
+        value: String(missing),
+        note: "Needs card, member ID, or subscriber detail",
+        icon: IconAlertTriangle,
+      },
+      {
+        label: "Open balance",
+        value: formatCurrency(openBalance),
+        note: "Estimated patient responsibility",
+        icon: IconReceipt2,
+      },
+    ];
+  }, [records]);
+
+  async function seedDemoRecords() {
+    setIsSeeding(true);
+
+    try {
+      await Promise.all(
+        demoRecords.map((record) =>
+          addDoc(collection(db, "billingRecords"), {
+            ...record,
+            createdBy: auth.currentUser?.uid ?? null,
+            createdByEmail: auth.currentUser?.email ?? null,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          }),
+        ),
+      );
+
+      toast.success("Demo billing records added", {
+        description: "The Billing & Insurance dashboard is now using Firestore data.",
+      });
+    } catch {
+      toast.error("Unable to add demo records", {
+        description: "Check Firebase permissions for billingRecords.",
+      });
+    } finally {
+      setIsSeeding(false);
+    }
+  }
+
+  async function sendReminder(record: BillingRecord) {
+    try {
+      await updateDoc(doc(db, "billingRecords", record.id), {
+        reminderSentAt: new Date().toISOString(),
+        updatedAt: serverTimestamp(),
+      });
+      toast.success("Reminder sent", {
+        description: `Payment reminder queued for ${record.patient}.`,
+      });
+    } catch {
+      toast.error("Reminder was not sent", {
+        description: "Firebase could not update this billing record.",
+      });
+    }
   }
 
   return (
@@ -299,14 +388,29 @@ export default function BillingPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => downloadBillingCsv(filteredRecords)}
-              >
-                <IconDownload />
-                Export CSV
-              </Button>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={seedDemoRecords}
+                  disabled={isSeeding || records.length > 0}
+                >
+                  <IconDatabaseImport />
+                  {records.length > 0
+                    ? "Firebase connected"
+                    : isSeeding
+                      ? "Adding..."
+                      : "Seed demo records"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => downloadBillingCsv(filteredRecords)}
+                >
+                  <IconDownload />
+                  Export CSV
+                </Button>
+              </div>
             </div>
           </CardHeader>
           <CardContent>
@@ -330,7 +434,7 @@ export default function BillingPage() {
                 </TableHeader>
                 <TableBody>
                   {filteredRecords.map((record) => (
-                    <TableRow key={`${record.patient}-${record.invoice}`}>
+                    <TableRow key={record.id}>
                       <TableCell>
                         <div className="font-medium">{record.patient}</div>
                         <div className="text-muted-foreground text-xs">
@@ -362,13 +466,11 @@ export default function BillingPage() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => sendReminder(record.patient)}
+                            onClick={() => sendReminder(record)}
                           >
                             <IconMailForward />
                             <span className="hidden xl:inline">
-                              {sentReminders.includes(record.patient)
-                                ? "Sent"
-                                : "Send Reminder"}
+                              {record.reminderSentAt ? "Sent" : "Send Reminder"}
                             </span>
                           </Button>
                           <BillingDetailsDrawer record={record} />
@@ -382,7 +484,11 @@ export default function BillingPage() {
                         colSpan={6}
                         className="text-muted-foreground h-24 text-center"
                       >
-                        No billing records match this search.
+                        {isLoading
+                          ? "Loading billing records from Firebase..."
+                          : records.length === 0
+                            ? "No billing records in Firebase yet. Seed demo records to start."
+                            : "No billing records match this view."}
                       </TableCell>
                     </TableRow>
                   ) : null}
@@ -397,8 +503,42 @@ export default function BillingPage() {
 }
 
 function BillingDetailsDrawer({ record }: { record: BillingRecord }) {
+  const [open, setOpen] = React.useState(false);
+  const [notes, setNotes] = React.useState(record.notes);
+  const [isSaving, setIsSaving] = React.useState(false);
+
+  async function saveBillingReview() {
+    setIsSaving(true);
+
+    try {
+      await updateDoc(doc(db, "billingRecords", record.id), {
+        notes,
+        updatedAt: serverTimestamp(),
+      });
+      toast.success("Billing review saved", {
+        description: `${record.patient}'s billing notes were updated.`,
+      });
+    } catch {
+      toast.error("Billing review was not saved", {
+        description: "Firebase could not update this billing record.",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   return (
-    <Drawer direction="right">
+    <Drawer
+      direction="right"
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+
+        if (nextOpen) {
+          setNotes(record.notes);
+        }
+      }}
+    >
       <DrawerTrigger asChild>
         <Button size="sm" variant="outline">
           View
@@ -451,10 +591,10 @@ function BillingDetailsDrawer({ record }: { record: BillingRecord }) {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => downloadInvoiceBreakdown(record)}
+                onClick={() => downloadInvoicePdf(record)}
               >
                 <IconDownload />
-                Download
+                PDF
               </Button>
             </div>
             <div className="grid gap-2">
@@ -491,19 +631,22 @@ function BillingDetailsDrawer({ record }: { record: BillingRecord }) {
           <div className="grid gap-2">
             <label
               className="text-sm font-medium"
-              htmlFor={`${record.patient}-notes`}
+              htmlFor={`${record.id}-notes`}
             >
               Billing notes
             </label>
             <Textarea
-              id={`${record.patient}-notes`}
-              defaultValue={record.notes}
+              id={`${record.id}-notes`}
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
             />
           </div>
         </div>
 
         <DrawerFooter>
-          <Button>Save billing review</Button>
+          <Button onClick={saveBillingReview} disabled={isSaving}>
+            {isSaving ? "Saving..." : "Save billing review"}
+          </Button>
           <DrawerClose asChild>
             <Button variant="outline">Close</Button>
           </DrawerClose>
@@ -511,6 +654,76 @@ function BillingDetailsDrawer({ record }: { record: BillingRecord }) {
       </DrawerContent>
     </Drawer>
   );
+}
+
+function toBillingRecord(id: string, data: Record<string, unknown>): BillingRecord {
+  return {
+    id,
+    patient: getString(data.patient, "Unnamed patient"),
+    dateOfBirth: getString(data.dateOfBirth, "Not provided"),
+    provider: getString(data.provider, "Unassigned"),
+    appointment: getString(data.appointment, "Not scheduled"),
+    insurance: getString(data.insurance, "Not provided"),
+    memberId: getString(data.memberId, "Missing"),
+    status: getBillingStatus(data.status),
+    balance: getString(data.balance, "$0.00"),
+    invoice: getString(data.invoice, "Draft"),
+    cardStatus: getString(data.cardStatus, "No card uploaded"),
+    notes: getString(data.notes),
+    reminderSentAt: getString(data.reminderSentAt),
+    breakdown: getBreakdown(data.breakdown),
+  };
+}
+
+function getString(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function getBillingStatus(value: unknown): BillingStatus {
+  if (value === "Verified" || value === "Pending" || value === "Missing Info") {
+    return value;
+  }
+
+  return "Pending";
+}
+
+function getBreakdown(value: unknown): BillingRecord["breakdown"] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+
+      const record = item as Record<string, unknown>;
+
+      return {
+        label: getString(record.label, "Line item"),
+        amount: getString(record.amount, "$0.00"),
+      };
+    })
+    .filter((item): item is BillingRecord["breakdown"][number] => item !== null);
+}
+
+function parseCurrency(value: string) {
+  const match = value.match(currencyPattern);
+
+  if (!match) {
+    return 0;
+  }
+
+  return Number(match[0].replace(/[$,]/g, "")) || 0;
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
 }
 
 function downloadBillingCsv(billingRecords: BillingRecord[]) {
@@ -543,28 +756,79 @@ function downloadBillingCsv(billingRecords: BillingRecord[]) {
     ]),
   ];
 
-  downloadTextFile("iha-billing-records.csv", toCsv(rows));
+  downloadBlob("iha-billing-records.csv", toCsv(rows), "text/csv;charset=utf-8");
 }
 
-function downloadInvoiceBreakdown(record: BillingRecord) {
-  const rows = [
-    ["Patient", record.patient],
-    ["Invoice", record.invoice],
-    ["Insurance", record.insurance],
-    ["Member ID", record.memberId],
-    ["Status", record.status],
-    ["Balance", record.balance],
-    [],
-    ["Line Item", "Amount"],
-    ...record.breakdown.map((item) => [item.label, item.amount]),
+function downloadInvoicePdf(record: BillingRecord) {
+  const lines = [
+    "IHA CareFlow Invoice",
+    `Invoice: ${record.invoice}`,
+    `Patient: ${record.patient}`,
+    `DOB: ${record.dateOfBirth}`,
+    `Appointment: ${record.appointment}`,
+    `Provider: ${record.provider}`,
+    `Insurance: ${record.insurance}`,
+    `Member ID: ${record.memberId}`,
+    `Status: ${record.status}`,
+    "",
+    "Invoice breakdown",
+    ...record.breakdown.map((item) => `${item.label}: ${item.amount}`),
+    "",
+    `Patient balance: ${record.balance}`,
+    "",
+    "Notes",
+    record.notes || "No billing notes recorded.",
   ];
 
-  const fileName = `${record.invoice || record.patient}-invoice-breakdown.csv`
+  const fileName = `${record.invoice || record.patient}-invoice`
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
 
-  downloadTextFile(`${fileName}.csv`, toCsv(rows));
+  downloadBlob(`${fileName}.pdf`, createSimplePdf(lines), "application/pdf");
+}
+
+function createSimplePdf(lines: string[]) {
+  const contentLines = lines
+    .slice(0, 34)
+    .map((line, index) => {
+      const fontSize = index === 0 ? 18 : 11;
+      const y = 760 - index * 20;
+
+      return `BT /F1 ${fontSize} Tf 54 ${y} Td (${escapePdfText(line)}) Tj ET`;
+    })
+    .join("\n");
+  const stream = `${contentLines}\n`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}endstream`,
+  ];
+
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+
+  objects.forEach((object, index) => {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+
+  const xrefOffset = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += "0000000000 65535 f \n";
+  offsets.slice(1).forEach((offset) => {
+    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  });
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n`;
+  pdf += `startxref\n${xrefOffset}\n%%EOF`;
+
+  return pdf;
+}
+
+function escapePdfText(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
 }
 
 function toCsv(rows: string[][]) {
@@ -580,8 +844,8 @@ function toCsv(rows: string[][]) {
     .join("\n");
 }
 
-function downloadTextFile(fileName: string, content: string) {
-  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+function downloadBlob(fileName: string, content: BlobPart, type: string) {
+  const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
 
