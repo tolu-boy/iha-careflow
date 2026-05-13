@@ -1,11 +1,14 @@
 "use client";
 
+import * as React from "react";
 import {
   IconAlertTriangle,
   IconChecklist,
   IconCreditCard,
+  IconDownload,
   IconFileInvoice,
   IconId,
+  IconMailForward,
   IconReceipt2,
   IconSearch,
   IconShieldCheck,
@@ -31,6 +34,13 @@ import {
   DrawerTrigger,
 } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import {
   Table,
@@ -43,6 +53,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 
 type BillingStatus = "Verified" | "Pending" | "Missing Info";
+type StatusFilter = BillingStatus | "All";
 
 type BillingRecord = {
   patient: string;
@@ -189,6 +200,32 @@ const statusStyles: Record<BillingStatus, string> = {
 };
 
 export default function BillingPage() {
+  const [search, setSearch] = React.useState("");
+  const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("All");
+  const [sentReminders, setSentReminders] = React.useState<string[]>([]);
+
+  const filteredRecords = React.useMemo(() => {
+    const query = search.trim().toLowerCase();
+
+    return records.filter((record) => {
+      const matchesSearch =
+        !query ||
+        record.patient.toLowerCase().includes(query) ||
+        record.insurance.toLowerCase().includes(query) ||
+        record.invoice.toLowerCase().includes(query);
+      const matchesStatus =
+        statusFilter === "All" || record.status === statusFilter;
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [search, statusFilter]);
+
+  function sendReminder(patient: string) {
+    setSentReminders((current) =>
+      current.includes(patient) ? current : [...current, patient],
+    );
+  }
+
   return (
     <div className="flex flex-1 flex-col gap-6">
       <div className="flex flex-col gap-3 px-4 lg:flex-row lg:items-end lg:justify-between lg:px-6">
@@ -203,10 +240,6 @@ export default function BillingPage() {
             Review insurance readiness, payment status, invoice estimates, and
             missing billing details before patient visits.
           </p>
-        </div>
-        <div className="relative sm:w-72">
-          <IconSearch className="text-muted-foreground absolute left-3 top-2.5 size-4" />
-          <Input className="pl-9" placeholder="Search billing records" />
         </div>
       </div>
 
@@ -231,16 +264,50 @@ export default function BillingPage() {
 
       <div className="px-4 lg:px-6">
         <Card className="rounded-lg">
-          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <CardHeader className="flex flex-col gap-4">
             <div>
               <CardTitle>Patient billing records</CardTitle>
               <CardDescription>
                 Color-coded insurance and invoice status by patient.
               </CardDescription>
             </div>
-            <Button variant="outline" size="sm">
-              Export report
-            </Button>
+            <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="relative sm:w-72">
+                  <IconSearch className="text-muted-foreground absolute left-3 top-2.5 size-4" />
+                  <Input
+                    className="pl-9"
+                    placeholder="Search patients by name"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                  />
+                </div>
+                <Select
+                  value={statusFilter}
+                  onValueChange={(value) =>
+                    setStatusFilter(value as StatusFilter)
+                  }
+                >
+                  <SelectTrigger className="w-full sm:w-48">
+                    <SelectValue placeholder="Filter by status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="All">All statuses</SelectItem>
+                    <SelectItem value="Verified">Verified</SelectItem>
+                    <SelectItem value="Pending">Pending</SelectItem>
+                    <SelectItem value="Missing Info">Missing Info</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => downloadBillingCsv(filteredRecords)}
+              >
+                <IconDownload />
+                Export CSV
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="overflow-hidden rounded-lg border">
@@ -262,7 +329,7 @@ export default function BillingPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {records.map((record) => (
+                  {filteredRecords.map((record) => (
                     <TableRow key={`${record.patient}-${record.invoice}`}>
                       <TableCell>
                         <div className="font-medium">{record.patient}</div>
@@ -290,11 +357,35 @@ export default function BillingPage() {
                       <TableCell className="hidden text-right sm:table-cell">
                         {record.balance}
                       </TableCell>
-                      <TableCell className="text-right">
-                        <BillingDetailsDrawer record={record} />
+                      <TableCell>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => sendReminder(record.patient)}
+                          >
+                            <IconMailForward />
+                            <span className="hidden xl:inline">
+                              {sentReminders.includes(record.patient)
+                                ? "Sent"
+                                : "Send Reminder"}
+                            </span>
+                          </Button>
+                          <BillingDetailsDrawer record={record} />
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
+                  {filteredRecords.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={6}
+                        className="text-muted-foreground h-24 text-center"
+                      >
+                        No billing records match this search.
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
                 </TableBody>
               </Table>
             </div>
@@ -310,7 +401,7 @@ function BillingDetailsDrawer({ record }: { record: BillingRecord }) {
     <Drawer direction="right">
       <DrawerTrigger asChild>
         <Button size="sm" variant="outline">
-          {record.status === "Verified" ? "View" : "Review"}
+          View
         </Button>
       </DrawerTrigger>
       <DrawerContent className="overflow-y-auto sm:max-w-xl">
@@ -352,9 +443,19 @@ function BillingDetailsDrawer({ record }: { record: BillingRecord }) {
           </div>
 
           <div className="rounded-lg border p-4">
-            <div className="mb-3 flex items-center gap-2">
-              <IconFileInvoice className="text-primary size-5" />
-              <h3 className="font-medium">Invoice breakdown</h3>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <IconFileInvoice className="text-primary size-5" />
+                <h3 className="font-medium">Invoice breakdown</h3>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => downloadInvoiceBreakdown(record)}
+              >
+                <IconDownload />
+                Download
+              </Button>
             </div>
             <div className="grid gap-2">
               {record.breakdown.map((item) => (
@@ -388,10 +489,16 @@ function BillingDetailsDrawer({ record }: { record: BillingRecord }) {
           </div>
 
           <div className="grid gap-2">
-            <label className="text-sm font-medium" htmlFor={`${record.patient}-notes`}>
+            <label
+              className="text-sm font-medium"
+              htmlFor={`${record.patient}-notes`}
+            >
               Billing notes
             </label>
-            <Textarea id={`${record.patient}-notes`} defaultValue={record.notes} />
+            <Textarea
+              id={`${record.patient}-notes`}
+              defaultValue={record.notes}
+            />
           </div>
         </div>
 
@@ -404,6 +511,86 @@ function BillingDetailsDrawer({ record }: { record: BillingRecord }) {
       </DrawerContent>
     </Drawer>
   );
+}
+
+function downloadBillingCsv(billingRecords: BillingRecord[]) {
+  const rows = [
+    [
+      "Patient",
+      "Date of Birth",
+      "Provider",
+      "Appointment",
+      "Insurance",
+      "Member ID",
+      "Status",
+      "Balance",
+      "Invoice",
+      "Card Status",
+      "Notes",
+    ],
+    ...billingRecords.map((record) => [
+      record.patient,
+      record.dateOfBirth,
+      record.provider,
+      record.appointment,
+      record.insurance,
+      record.memberId,
+      record.status,
+      record.balance,
+      record.invoice,
+      record.cardStatus,
+      record.notes,
+    ]),
+  ];
+
+  downloadTextFile("iha-billing-records.csv", toCsv(rows));
+}
+
+function downloadInvoiceBreakdown(record: BillingRecord) {
+  const rows = [
+    ["Patient", record.patient],
+    ["Invoice", record.invoice],
+    ["Insurance", record.insurance],
+    ["Member ID", record.memberId],
+    ["Status", record.status],
+    ["Balance", record.balance],
+    [],
+    ["Line Item", "Amount"],
+    ...record.breakdown.map((item) => [item.label, item.amount]),
+  ];
+
+  const fileName = `${record.invoice || record.patient}-invoice-breakdown.csv`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+
+  downloadTextFile(`${fileName}.csv`, toCsv(rows));
+}
+
+function toCsv(rows: string[][]) {
+  return rows
+    .map((row) =>
+      row
+        .map((cell) => {
+          const value = String(cell ?? "");
+          return `"${value.replace(/"/g, '""')}"`;
+        })
+        .join(","),
+    )
+    .join("\n");
+}
+
+function downloadTextFile(fileName: string, content: string) {
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function DetailBlock({
