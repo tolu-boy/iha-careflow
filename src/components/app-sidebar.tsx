@@ -41,12 +41,12 @@ const data = {
     },
     {
       title: "Patient Onboarding",
-      url: "/admin/dashboard",
+      url: "/admin/onboarding",
       icon: IconListDetails,
     },
     {
       title: "Billing & Insurance",
-      url: "/admin/dashboard",
+      url: "/admin/billing",
       icon: IconInvoice,
     },
     {
