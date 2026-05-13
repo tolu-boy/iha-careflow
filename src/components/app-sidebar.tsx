@@ -5,18 +5,17 @@ import {
   IconCalendar,
   IconClipboardText,
   IconDashboard,
-  IconHeartHandshake,
   IconInvoice,
   IconMessageCircle,
-  IconFileWord,
   IconHelp,
   IconListDetails,
-  IconReport,
   IconSearch,
   IconSettings,
+  IconStethoscope,
+  IconUsersGroup,
 } from "@tabler/icons-react";
 
-import { NavDocuments } from "@/components/nav-documents";
+import { NavCareDirectory } from "@/components/nav-care-directory";
 import { NavMain } from "@/components/nav-main";
 import { NavSecondary } from "@/components/nav-secondary";
 import { NavUser } from "@/components/nav-user";
@@ -51,17 +50,17 @@ const data = {
     },
     {
       title: "Clinical Notes",
-      url: "/admin/dashboard",
+      url: "/admin/clinical-notes",
       icon: IconClipboardText,
     },
     {
       title: "Patient Messages",
-      url: "/admin/dashboard",
+      url: "/admin/messages",
       icon: IconMessageCircle,
     },
     {
       title: "Scheduling",
-      url: "/admin/dashboard",
+      url: "/admin/scheduling",
       icon: IconCalendar,
     },
   ],
@@ -82,21 +81,16 @@ const data = {
       icon: IconSearch,
     },
   ],
-  documents: [
+  careDirectory: [
     {
-      name: "Care Pathways",
-      url: "#",
-      icon: IconHeartHandshake,
+      name: "Patients",
+      url: "/admin/patients",
+      icon: IconUsersGroup,
     },
     {
-      name: "Operations Reports",
-      url: "#",
-      icon: IconReport,
-    },
-    {
-      name: "Templates",
-      url: "#",
-      icon: IconFileWord,
+      name: "Doctors",
+      url: "/admin/doctors",
+      icon: IconStethoscope,
     },
   ],
 };
@@ -123,7 +117,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarHeader>
       <SidebarContent>
         <NavMain items={data.navMain} />
-        <NavDocuments items={data.documents} />
+        <NavCareDirectory items={data.careDirectory} />
         <NavSecondary items={data.navSecondary} className="mt-auto" />
       </SidebarContent>
       <SidebarFooter>
