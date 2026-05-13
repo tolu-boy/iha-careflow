@@ -1,0 +1,158 @@
+import Link from "next/link";
+import { IconArrowRight, IconHeartbeat, IconShieldLock } from "@tabler/icons-react";
+
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+type AuthPanelProps = {
+  mode: "login" | "register";
+};
+
+export function AuthPanel({ mode }: AuthPanelProps) {
+  const isRegister = mode === "register";
+
+  return (
+    <main className="grid min-h-svh bg-background lg:grid-cols-[1fr_0.82fr]">
+      <section className="flex items-center justify-center px-5 py-10 sm:px-8">
+        <div className="w-full max-w-[430px]">
+          <div className="mb-8 flex items-center gap-3">
+            <div className="flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <IconHeartbeat className="size-5" />
+            </div>
+            <div className="leading-tight">
+              <p className="font-semibold">IHA CareFlow</p>
+              <p className="text-muted-foreground text-sm">
+                Admin operations workspace
+              </p>
+            </div>
+          </div>
+
+          <Card className="rounded-lg shadow-xs">
+            <CardHeader>
+              <CardTitle className="text-2xl">
+                {isRegister ? "Create admin account" : "Admin login"}
+              </CardTitle>
+              <CardDescription>
+                {isRegister
+                  ? "Set up access for the care operations dashboard."
+                  : "Sign in to manage onboarding, billing, notes, messaging, and scheduling."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form className="grid gap-4">
+                {isRegister ? (
+                  <div className="grid gap-2">
+                    <Label htmlFor="name">Full name</Label>
+                    <Input id="name" placeholder="Care team member" />
+                  </div>
+                ) : null}
+                <div className="grid gap-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="admin@integrativehealthcarealliance.com"
+                    autoComplete="email"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label htmlFor="password">Password</Label>
+                    {!isRegister ? (
+                      <Link
+                        href="#"
+                        className="text-muted-foreground text-sm hover:text-foreground"
+                      >
+                        Forgot password?
+                      </Link>
+                    ) : null}
+                  </div>
+                  <Input
+                    id="password"
+                    type="password"
+                    autoComplete={isRegister ? "new-password" : "current-password"}
+                  />
+                </div>
+                {isRegister ? (
+                  <div className="grid gap-2">
+                    <Label htmlFor="confirm-password">Confirm password</Label>
+                    <Input
+                      id="confirm-password"
+                      type="password"
+                      autoComplete="new-password"
+                    />
+                  </div>
+                ) : null}
+                <Button asChild className="mt-2 w-full">
+                  <Link href="/admin/dashboard">
+                    {isRegister ? "Create account" : "Sign in"}
+                    <IconArrowRight />
+                  </Link>
+                </Button>
+              </form>
+            </CardContent>
+            <CardFooter className="justify-center border-t text-sm">
+              {isRegister ? (
+                <p className="text-muted-foreground">
+                  Already have an account?{" "}
+                  <Link className="font-medium text-primary" href="/login">
+                    Login
+                  </Link>
+                </p>
+              ) : (
+                <p className="text-muted-foreground">
+                  Not a member?{" "}
+                  <Link className="font-medium text-primary" href="/register">
+                    Register
+                  </Link>
+                </p>
+              )}
+            </CardFooter>
+          </Card>
+        </div>
+      </section>
+
+      <aside className="hidden min-h-svh border-l bg-[linear-gradient(145deg,var(--primary),var(--chart-2))] p-10 text-primary-foreground lg:flex">
+        <div className="flex h-full max-w-lg flex-col justify-between">
+          <div className="inline-flex w-fit items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1 text-sm">
+            <IconShieldLock className="size-4" />
+            Care team access
+          </div>
+          <div className="space-y-5">
+            <p className="text-4xl font-semibold leading-tight">
+              A calmer control room for whole-person care operations.
+            </p>
+            <p className="max-w-md text-base leading-7 text-white/80">
+              Track intake readiness, insurance follow-ups, clinical
+              documentation, patient messages, and provider schedules from one
+              focused workspace.
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-3 text-sm">
+            <div className="rounded-lg border border-white/20 bg-white/10 p-3">
+              <p className="text-2xl font-semibold">18</p>
+              <p className="text-white/75">Onboarding</p>
+            </div>
+            <div className="rounded-lg border border-white/20 bg-white/10 p-3">
+              <p className="text-2xl font-semibold">7</p>
+              <p className="text-white/75">Billing</p>
+            </div>
+            <div className="rounded-lg border border-white/20 bg-white/10 p-3">
+              <p className="text-2xl font-semibold">86%</p>
+              <p className="text-white/75">Schedule</p>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+  );
+}
