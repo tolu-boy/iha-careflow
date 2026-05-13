@@ -1,0 +1,110 @@
+[
+  {
+    "id": 1,
+    "header": "New consult intake packet",
+    "type": "Onboarding",
+    "status": "In Process",
+    "target": "6",
+    "limit": "2",
+    "reviewer": "Front Desk"
+  },
+  {
+    "id": 2,
+    "header": "Insurance benefits verification",
+    "type": "Billing",
+    "status": "In Process",
+    "target": "7",
+    "limit": "3",
+    "reviewer": "Billing Team"
+  },
+  {
+    "id": 3,
+    "header": "90-minute evaluation note",
+    "type": "Clinical Notes",
+    "status": "In Process",
+    "target": "4",
+    "limit": "2",
+    "reviewer": "Provider"
+  },
+  {
+    "id": 4,
+    "header": "Secure message triage",
+    "type": "Messaging",
+    "status": "Done",
+    "target": "12",
+    "limit": "0",
+    "reviewer": "Clinical Team"
+  },
+  {
+    "id": 5,
+    "header": "Follow-up scheduling gaps",
+    "type": "Scheduling",
+    "status": "In Process",
+    "target": "5",
+    "limit": "1",
+    "reviewer": "Front Desk"
+  },
+  {
+    "id": 6,
+    "header": "Lab order coordination",
+    "type": "Operations",
+    "status": "In Process",
+    "target": "8",
+    "limit": "4",
+    "reviewer": "Clinical Team"
+  },
+  {
+    "id": 7,
+    "header": "Medication refill review",
+    "type": "Clinical Notes",
+    "status": "Done",
+    "target": "9",
+    "limit": "0",
+    "reviewer": "Provider"
+  },
+  {
+    "id": 8,
+    "header": "Superbill preparation",
+    "type": "Billing",
+    "status": "In Process",
+    "target": "3",
+    "limit": "1",
+    "reviewer": "Billing Team"
+  },
+  {
+    "id": 9,
+    "header": "Consent forms awaiting signature",
+    "type": "Onboarding",
+    "status": "In Process",
+    "target": "5",
+    "limit": "2",
+    "reviewer": "Front Desk"
+  },
+  {
+    "id": 10,
+    "header": "Care plan updates",
+    "type": "Clinical Notes",
+    "status": "In Process",
+    "target": "6",
+    "limit": "3",
+    "reviewer": "Provider"
+  },
+  {
+    "id": 11,
+    "header": "Patient portal replies",
+    "type": "Messaging",
+    "status": "Done",
+    "target": "15",
+    "limit": "1",
+    "reviewer": "Clinical Team"
+  },
+  {
+    "id": 12,
+    "header": "Provider schedule utilization",
+    "type": "Scheduling",
+    "status": "Done",
+    "target": "86",
+    "limit": "0",
+    "reviewer": "Front Desk"
+  }
+]
