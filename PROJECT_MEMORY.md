@@ -4,7 +4,7 @@ Last updated: 2026-05-13
 
 ## Project Overview
 
-`iha-careflow` is a Next.js 16 App Router application for Integrative Healthcare Alliance care operations. The current priority is UI-first. Firebase has been initialized, but real auth and Firestore persistence are not wired yet.
+`iha-careflow` is a Next.js 16 App Router application for Integrative Healthcare Alliance care operations. The current priority is UI-first. Firebase has been initialized, Firebase Auth is wired for login/register/logout, admin user profiles save to Firestore, and onboarding saves new patient data to Firestore.
 
 The app was adapted from a shadcn-style admin dashboard reference, but Convex and Clerk were intentionally removed. Patient/provider directory data now lives in a Zustand store; other workflow data is still static/local component state.
 
@@ -12,6 +12,7 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
 
 - Use Node 22: `nvm use 22`
 - Install/run with pnpm.
+- Firebase browser config lives in ignored `.env.local` using `NEXT_PUBLIC_FIREBASE_*` variables.
 - `pnpm dev` uses webpack intentionally:
   - Script: `next dev --webpack`
   - Turbopack dev was stalling on route compilation in this environment.
@@ -23,8 +24,12 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
 ## App Architecture
 
 - Framework: Next.js `16.2.6`, React `19.2.4`, App Router.
-- Firebase SDK: initialized for app/Auth/Firestore/Storage/Analytics.
-- Global state: Zustand store in `src/stores/careflow-store.ts`.
+- Firebase SDK: initialized for app/Auth/Firestore/Storage. Analytics was intentionally removed.
+- Auth: Firebase email/password auth with a protected admin layout.
+- Firestore rules/config files exist locally for project `iha-careflow`.
+- Global state:
+  - Auth/session state in `src/stores/auth-store.ts`.
+  - Patient/provider workflow state in `src/stores/careflow-store.ts`.
 - Styling: Tailwind CSS v4 via `src/app/globals.css`.
 - Component style: shadcn/ui-style primitives under `src/components/ui`.
 - Icons: `@tabler/icons-react` mostly, plus some `lucide-react` inside shadcn primitives.
@@ -46,15 +51,18 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
 - `/login`
   - File: `src/app/login/page.tsx`
   - Uses `AuthPanel` from `src/components/auth-panel.tsx`.
-  - UI-only admin login with email/password.
+  - Firebase email/password admin login.
   - “Not a member? Register” links to `/register`.
-  - Submit button routes to `/admin/dashboard`.
+  - Successful login updates Zustand auth state and routes to `/admin/dashboard`.
+  - Authenticated users are redirected away from login to `/admin/dashboard`.
 
 - `/register`
   - File: `src/app/register/page.tsx`
   - Uses the same `AuthPanel`.
-  - UI-only registration form with name/email/password/confirm password.
-  - Submit button routes to `/admin/dashboard`.
+  - Firebase email/password registration form with name/email/password/confirm password.
+  - Successful registration updates Firebase profile, creates a `users/{uid}` Firestore doc, updates Zustand auth state, and routes to `/admin/dashboard`.
+  - Saved user fields include `uid`, `userId`, `fullName`, `displayName`, `email`, `role`, `active`, `createdAt`, and `updatedAt`.
+  - If Firestore rules reject profile doc creation, registration shows a Firestore permissions error instead of silently continuing.
 
 ### Admin Routes
 
@@ -64,12 +72,13 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
   - Uses:
     - `SectionCards`
     - `ChartAreaInteractive`
-    - `DataTable`
-  - Static data file: `src/app/admin/dashboard/data.json`.
+  - Active Queue table was removed from this page per user request.
 
 - `/admin/onboarding`
   - File: `src/app/admin/onboarding/page.tsx`
   - New-patient intake form, not an operations queue.
+  - Saves new patient data to Firestore collection `patients`.
+  - Successful save shows a Sonner toast saying `Patient data saved` and clears the form.
   - Collects:
     - Full name
     - Date of birth
@@ -84,10 +93,13 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
     - Insurance provider/member ID
     - Billing preference
   - Includes live auto-summary panel.
+  - Primary action is `Save patient data`; the previous `Review intake summary` button was removed.
 
 - `/admin/billing`
   - File: `src/app/admin/billing/page.tsx`
   - Billing and insurance dashboard.
+  - Reads from Firestore collection `billingRecords` with a live snapshot.
+  - Includes a `Seed demo records` button if demo billing data needs to be added to Firebase.
   - Summary cards at top.
   - Patient billing records table.
   - Search by patient/insurance/invoice.
@@ -95,14 +107,14 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
   - CSV export for filtered billing records.
   - Each row has:
     - `View`
-    - `Send Reminder`
+    - `Send Reminder`, which updates `reminderSentAt` in Firestore.
   - Details drawer includes:
     - Insurance details
     - Uploaded insurance card placeholder
     - Invoice breakdown
-    - Invoice breakdown CSV download
+    - Invoice PDF download generated in the browser
     - Verification status
-    - Billing notes
+    - Billing notes saved back to Firestore
 
 - `/admin/clinical-notes`
   - File: `src/app/admin/clinical-notes/page.tsx`
@@ -211,20 +223,39 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
 
 - `src/components/auth-panel.tsx`
   - Shared login/register panel.
+  - Calls Firebase Auth:
+    - `signInWithEmailAndPassword`
+    - `createUserWithEmailAndPassword`
+    - `updateProfile`
+  - Writes new staff profiles to `users/{uid}` on registration.
+  - Loads the Firestore user profile into Zustand on login.
+  - Shows user-friendly Firebase auth errors.
 
 - `src/components/firebase-provider.tsx`
   - Client provider mounted in `src/app/layout.tsx`.
-  - Initializes Firebase Analytics only in the browser.
+  - Subscribes to `onAuthStateChanged`.
+  - Reads `users/{uid}` from Firestore and syncs the profile into Zustand auth state.
+  - If an older Firebase Auth user has no profile doc yet, it attempts to create/repair one.
+
+- `src/lib/auth-profile.ts`
+  - Converts Firebase Auth users plus optional Firestore profile data into the shared Zustand `AuthUser` shape.
 
 - `src/lib/firebase.ts`
   - Firebase app configuration for project `iha-careflow`.
-  - Exports `firebaseApp`, `auth`, `db`, `storage`, and `getFirebaseAnalytics`.
-  - Uses a guarded analytics initializer so server rendering/builds do not call `getAnalytics`.
+  - Exports `firebaseApp`, `auth`, `db`, and `storage`.
+  - Firebase Analytics is not used in this app.
+  - Reads Firebase config from `NEXT_PUBLIC_FIREBASE_*` environment variables instead of hardcoded source values.
 
 - `src/stores/careflow-store.ts`
   - Zustand store for global patient/provider directory state.
   - Exports shared `Patient`, `Doctor`, status, risk, and insurance types.
   - Stores active patient/provider IDs and supports adding providers from the Doctors page.
+
+- `src/stores/auth-store.ts`
+  - Zustand auth/session store.
+  - Tracks `user` and auth `status`: `loading`, `authenticated`, `unauthenticated`.
+  - User state includes `uid`, `userId`, `fullName`, `displayName`, `email`, `photoURL`, `role`, and `active`.
+  - Used by auth forms, admin route protection, Firebase provider, and sidebar logout.
 
 - `src/components/app-sidebar.tsx`
   - Sidebar navigation and app brand.
@@ -249,34 +280,53 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
 - `src/components/site-header.tsx`
   - Admin header.
 
-- `src/components/data-table.tsx`
-  - Lightweight dashboard table. Replaced heavy TanStack/DnD shadcn demo table because dev compilation felt too slow.
+- `src/components/nav-user.tsx`
+  - Reads authenticated user from Zustand.
+  - Shows account email/name in sidebar footer.
+  - Logout calls Firebase `signOut`, resets Zustand auth state, and redirects to `/login`.
+
+- `src/app/admin/layout.tsx`
+  - Client-side protected admin shell.
+  - Redirects unauthenticated users to `/login`.
+  - Shows a compact verifying-session state while Firebase Auth is loading.
 
 - `src/app/globals.css`
   - Theme tokens. Palette is warm clinical/teal/earthy and not default shadcn neutral only.
 
+- `src/app/layout.tsx`
+  - Mounts the Firebase provider and the global Sonner toaster.
+  - Toasts appear at the top center of the app.
+
 - `next.config.ts`
   - Has `turbopack.root = __dirname` to avoid workspace-root warning.
 
+## Firebase / Firestore Rules
+
+- Local Firebase config files now exist:
+  - `firebase.json`
+  - `.firebaserc`
+  - `firestore.rules`
+- Firebase rules have not been deployed yet unless a Firebase CLI deploy succeeds in the current session.
+- The previous rule `allow read, write: if false;` blocks every Firestore read/write and causes registration profile saves and onboarding saves to fail with `permission-denied`.
+- The local `firestore.rules` file allows authenticated staff users to read/create/update app workflow collections, lets a user read/update their own `users/{uid}` profile, and denies deletes by default.
+- These rules still need to be pasted into Firebase Console or deployed with `firebase deploy --only firestore:rules` before the live Firebase project will use them.
+
 ## Firestore Collections
 
-Firebase is initialized, but Firestore collection reads/writes are not implemented yet. Recommended collection design for the backend phase:
+Firestore persistence has started with auth profiles and onboarding patient records. Recommended collection design for the backend phase:
 
 - `users`
   - Admin/staff/provider profiles.
-  - Fields: `uid`, `displayName`, `email`, `role`, `providerId`, `active`, `createdAt`.
+  - Fields: `uid`, `userId`, `fullName`, `displayName`, `email`, `role`, `providerId`, `active`, `createdAt`, `updatedAt`.
 
 - `patients`
   - Core patient profile.
-  - Fields: `fullName`, `dob`, `gender`, `phone`, `email`, `emergencyContact`, `riskLevel`, `reasonForCare`, `createdAt`.
+  - Currently written by `/admin/onboarding`.
+  - Fields include `fullName`, `dateOfBirth`, `gender`, `phone`, `email`, emergency contact fields, `reasonForVisit`, `symptoms`, medical history, medications, allergies, insurance provider, member ID, billing preference, `status`, `source`, `onboardingComplete`, `createdBy`, `createdByEmail`, `createdAt`, and `updatedAt`.
 
 - `providers`
   - Doctor/provider profile and schedule capacity.
   - Fields: `displayName`, `title`, `specialty`, `license`, `npi`, `email`, `phone`, `status`, `location`, `networkStatus`, `panelCount`, `availableSlots`, `createdAt`.
-
-- `patientIntakes`
-  - Intake/onboarding form submissions.
-  - Fields: `patientId`, `reasonForVisit`, `symptoms`, `medicalHistory`, `medications`, `allergies`, `insuranceProvider`, `memberId`, `billingPreference`, `status`, `submittedAt`.
 
 - `insuranceRecords`
   - Billing readiness and insurance verification.
@@ -284,7 +334,8 @@ Firebase is initialized, but Firestore collection reads/writes are not implement
 
 - `billingRecords`
   - Billing/invoice dashboard records.
-  - Fields: `patientId`, `appointmentId`, `invoiceId`, `status`, `balance`, `breakdown`, `notes`, `reminderSentAt`.
+  - Currently read/written by `/admin/billing`.
+  - Fields include `patient`, `dateOfBirth`, `provider`, `appointment`, `insurance`, `memberId`, `status`, `balance`, `invoice`, `cardStatus`, `breakdown`, `notes`, `reminderSentAt`, `createdBy`, `createdByEmail`, `createdAt`, and `updatedAt`.
 
 - `appointments`
   - Scheduling records.
@@ -372,18 +423,29 @@ Cross-page relationships already represented in UI:
   - Auth export
   - Firestore export
   - Storage export
-  - browser-safe Analytics initializer
+- Firebase Auth flow:
+  - login
+  - register
+  - user profile doc saved to `users/{uid}`
+  - Firestore profile loaded into Zustand auth state
+  - global auth state
+  - protected `/admin/*` shell
+  - sidebar logout redirect
+- Local Firestore rules/config files added for project `iha-careflow`.
 - Zustand global state added for patient/provider directory data.
 - Login/register UI routes.
 - Dashboard command center.
 - Patient onboarding intake form with live summary.
+- Onboarding save writes to the `patients` Firestore collection, shows a Sonner toast, and clears the form on success.
 - Billing & Insurance dashboard:
+  - Firestore live data from `billingRecords`
   - search
   - status filter
   - CSV export
   - reminder buttons
   - details drawer
-  - invoice breakdown download
+  - invoice PDF download
+  - billing notes persistence
 - Clinical Notes workbench:
   - notes list
   - SOAP editor
@@ -422,8 +484,9 @@ Cross-page relationships already represented in UI:
 
 - Firebase SDK is installed and initialized.
 - Move Firebase config to `NEXT_PUBLIC_*` environment variables before production.
-- Implement real auth for login/register.
-- Protect `/admin/*` routes.
+- Firebase Auth login/register/logout is implemented.
+- `/admin/*` routes are protected by the admin layout.
+- Deploy Firestore rules to Firebase Console/project.
 - Implement RBAC in frontend route guards and Firestore rules.
 - Add audit logging for clinical/billing/scheduling actions.
 
@@ -450,7 +513,6 @@ Cross-page relationships already represented in UI:
   - Add patient panel assignment and capacity rules.
 
 - Onboarding:
-  - Save drafts.
   - Submit intake.
   - Upload insurance card.
   - Consent forms.
