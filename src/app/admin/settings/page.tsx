@@ -38,6 +38,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useRolePermissions } from "@/hooks/use-role-permissions";
 import { auth, db } from "@/lib/firebase";
 import {
   careModuleDefinitions,
@@ -114,51 +115,22 @@ const statusStyles: Record<StaffUser["status"], string> = {
   Suspended: "border-red-200 bg-red-50 text-red-700",
 };
 
+let cachedStaff: StaffUser[] = [];
+let cachedStaffLoaded = false;
+
 export default function CareSettingsPage() {
   const authUser = useAuthStore((state) => state.user);
+  const { roles: savedRoles } = useRolePermissions();
   const [roles, setRoles] =
-    React.useState<RolePermissionConfig[]>(defaultRoles);
-  const [staff, setStaff] = React.useState<StaffUser[]>([]);
+    React.useState<RolePermissionConfig[]>(savedRoles);
+  const [staff, setStaff] = React.useState<StaffUser[]>(cachedStaff);
   const [activeRoleKey, setActiveRoleKey] =
     React.useState<RoleKey>("super_admin");
   const [staffSearch, setStaffSearch] = React.useState("");
-  const [isLoadingRoles, setIsLoadingRoles] = React.useState(true);
-  const [isLoadingStaff, setIsLoadingStaff] = React.useState(true);
+  const [isLoadingStaff, setIsLoadingStaff] =
+    React.useState(!cachedStaffLoaded);
   const [isSaving, setIsSaving] = React.useState(false);
-
-  React.useEffect(() => {
-    const unsubscribe = onSnapshot(
-      collection(db, "roles"),
-      (snapshot) => {
-        const firebaseRoles = snapshot.docs
-          .map((item) => toRoleConfig(item.id, item.data()))
-          .sort(
-            (first, second) =>
-              defaultRoles.findIndex((role) => role.key === first.key) -
-              defaultRoles.findIndex((role) => role.key === second.key),
-          );
-
-        setRoles(firebaseRoles.length > 0 ? firebaseRoles : defaultRoles);
-        setActiveRoleKey((current) =>
-          (firebaseRoles.length > 0 ? firebaseRoles : defaultRoles).some(
-            (role) => role.key === current,
-          )
-            ? current
-            : "admin",
-        );
-        setIsLoadingRoles(false);
-      },
-      (error) => {
-        setRoles(defaultRoles);
-        setIsLoadingRoles(false);
-        toast.error("Unable to load roles", {
-          description: error.message,
-        });
-      },
-    );
-
-    return unsubscribe;
-  }, []);
+  const [hasLocalRoleChanges, setHasLocalRoleChanges] = React.useState(false);
 
   React.useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -168,12 +140,16 @@ export default function CareSettingsPage() {
           .map((item) => toStaffUser(item.id, item.data()))
           .sort((first, second) => first.name.localeCompare(second.name));
 
+        cachedStaff = users;
+        cachedStaffLoaded = true;
         setStaff(users);
         setIsLoadingStaff(false);
       },
       (error) => {
+        let fallbackStaff = cachedStaff;
+
         if (authUser) {
-          setStaff([
+          fallbackStaff = [
             {
               id: authUser.uid,
               name: authUser.fullName || authUser.displayName,
@@ -182,9 +158,12 @@ export default function CareSettingsPage() {
               status: authUser.active ? "Active" : "Suspended",
               lastActive: "Current session",
             },
-          ]);
+          ];
         }
 
+        cachedStaff = fallbackStaff;
+        cachedStaffLoaded = true;
+        setStaff(fallbackStaff);
         setIsLoadingStaff(false);
         toast.error("Unable to load staff users", {
           description: error.message,
@@ -195,10 +174,13 @@ export default function CareSettingsPage() {
     return unsubscribe;
   }, [authUser]);
 
+  const visibleRoles = hasLocalRoleChanges ? roles : savedRoles;
   const activeRole =
-    roles.find((role) => role.key === activeRoleKey) ?? roles[0];
+    visibleRoles.find((role) => role.key === activeRoleKey) ??
+    visibleRoles.find((role) => role.key === "admin") ??
+    visibleRoles[0];
   const canManageSettings = hasPermission(
-    roles,
+    visibleRoles,
     authUser?.role,
     "settings",
     "manage",
@@ -213,7 +195,7 @@ export default function CareSettingsPage() {
 
     if (!query) return true;
 
-    return `${user.name} ${user.email} ${getRoleLabel(user.role, roles)}`
+    return `${user.name} ${user.email} ${getRoleLabel(user.role, visibleRoles)}`
       .toLowerCase()
       .includes(query);
   });
@@ -228,8 +210,10 @@ export default function CareSettingsPage() {
       return;
     }
 
-    setRoles((current) =>
-      current.map((role) =>
+    setRoles((current) => {
+      const sourceRoles = hasLocalRoleChanges ? current : visibleRoles;
+
+      return sourceRoles.map((role) =>
         role.key === roleKey
           ? {
               ...role,
@@ -239,8 +223,9 @@ export default function CareSettingsPage() {
               },
             }
           : role,
-      ),
-    );
+      );
+    });
+    setHasLocalRoleChanges(true);
   }
 
   async function updateStaffRole(userId: string, role: RoleKey) {
@@ -302,7 +287,7 @@ export default function CareSettingsPage() {
     try {
       const batch = writeBatch(db);
 
-      for (const role of roles) {
+      for (const role of visibleRoles) {
         batch.set(
           doc(db, "roles", role.key),
           {
@@ -318,6 +303,7 @@ export default function CareSettingsPage() {
       }
 
       await batch.commit();
+      setHasLocalRoleChanges(false);
       toast.success("Roles and permissions saved");
     } catch (error) {
       toast.error("Roles were not saved", {
@@ -336,8 +322,9 @@ export default function CareSettingsPage() {
     }
 
     setRoles(defaultRoles);
+    setHasLocalRoleChanges(true);
     toast.info("Role permissions reset locally", {
-      description: "Click Save changes to write the defaults to Firebase.",
+      description: "Click Save changes to store the defaults.",
     });
   }
 
@@ -377,14 +364,12 @@ export default function CareSettingsPage() {
           <div className="border-b p-4">
             <h3 className="font-semibold">Roles</h3>
             <p className="text-muted-foreground text-sm">
-              {isLoadingRoles
-                ? "Loading Firebase roles..."
-                : "Select a role to review its access."}
+              Select a role to review its access.
             </p>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
             <div className="grid gap-2">
-              {roles.map((role) => {
+              {visibleRoles.map((role) => {
                 const RoleIcon = roleIconMap[role.key];
 
                 return (
@@ -528,9 +513,7 @@ export default function CareSettingsPage() {
           <div className="border-b p-4">
             <h3 className="font-semibold">Staff</h3>
             <p className="text-muted-foreground text-sm">
-              {isLoadingStaff
-                ? "Loading Firebase users..."
-                : "Assign people to roles and turn access on or off."}
+              Assign people to roles and turn access on or off.
             </p>
             <div className="relative mt-3">
               <IconSearch className="text-muted-foreground absolute left-3 top-2.5 size-4" />
@@ -576,7 +559,7 @@ export default function CareSettingsPage() {
                           <SelectValue placeholder="Role" />
                         </SelectTrigger>
                         <SelectContent>
-                          {roles.map((role) => (
+                          {visibleRoles.map((role) => (
                             <SelectItem key={role.key} value={role.key}>
                               {role.label}
                             </SelectItem>
@@ -609,7 +592,7 @@ export default function CareSettingsPage() {
                 <div className="rounded-lg border border-dashed p-4 text-sm">
                   <p className="font-medium">No staff users found</p>
                   <p className="text-muted-foreground mt-1">
-                    Registered users will appear here from Firebase.
+                    Registered users will appear here.
                   </p>
                 </div>
               ) : null}
@@ -619,25 +602,6 @@ export default function CareSettingsPage() {
       </div>
     </div>
   );
-}
-
-function toRoleConfig(
-  fallbackKey: string,
-  data: Record<string, unknown>,
-): RolePermissionConfig {
-  const key = normalizeRole(getString(data.key, fallbackKey));
-  const fallbackRole =
-    defaultRoles.find((role) => role.key === key) ?? defaultRoles[1];
-
-  return {
-    key,
-    label: getString(data.label, fallbackRole.label),
-    description: getString(data.description, fallbackRole.description),
-    permissions: {
-      ...fallbackRole.permissions,
-      ...(isPermissionMap(data.permissions) ? data.permissions : {}),
-    },
-  };
 }
 
 function toStaffUser(id: string, data: Record<string, unknown>): StaffUser {
@@ -659,17 +623,6 @@ function toStaffUser(id: string, data: Record<string, unknown>): StaffUser {
       : "Suspended",
     lastActive: getString(data.lastActive, "Not tracked"),
   };
-}
-
-function isPermissionMap(value: unknown): value is Record<
-  PermissionKey,
-  PermissionLevel
-> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-
-  return Object.values(value).every(
-    (level) => level === "none" || level === "view" || level === "manage",
-  );
 }
 
 function getString(value: unknown, fallback: string) {

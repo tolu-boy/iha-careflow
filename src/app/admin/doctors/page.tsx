@@ -6,7 +6,6 @@ import {
   IconCalendarStats,
   IconCertificate,
   IconClockHour4,
-  IconDatabaseImport,
   IconFileText,
   IconMail,
   IconPhone,
@@ -98,113 +97,6 @@ const emptyDraft: DoctorDraft = {
   npi: "",
   status: "Available",
 };
-
-const demoDoctors: Doctor[] = [
-  {
-    id: "dr-smith",
-    name: "Dr Smith",
-    title: "Clinical Psychologist",
-    specialty: "Therapy",
-    license: "PSY-48291",
-    npi: "1847291044",
-    email: "dr.smith@ihacareflow.com",
-    phone: "(555) 018-1100",
-    status: "In Session",
-    todayAppointments: 7,
-    availableSlots: 2,
-    openNotes: 3,
-    nextAvailable: "Today 2:30 PM",
-    panelCount: 64,
-    highRiskPanel: 6,
-    capacity: 78,
-    location: "Main Clinic",
-    networkStatus: "Aetna, Cigna, BCBS",
-    upcoming: [
-      "10:00 AM - John Doe - Therapy",
-      "11:30 AM - Mike Johnson - Lab review",
-      "2:30 PM - Open slot",
-    ],
-    focus: "Anxiety, sleep disruption, trauma-informed therapy.",
-  },
-  {
-    id: "dr-lee",
-    name: "Dr Lee",
-    title: "Psychiatric Nurse Practitioner",
-    specialty: "Medication Management",
-    license: "NP-77312",
-    npi: "1729304818",
-    email: "dr.lee@ihacareflow.com",
-    phone: "(555) 019-2220",
-    status: "Available",
-    todayAppointments: 5,
-    availableSlots: 3,
-    openNotes: 1,
-    nextAvailable: "Today 1:00 PM",
-    panelCount: 51,
-    highRiskPanel: 3,
-    capacity: 62,
-    location: "Telehealth",
-    networkStatus: "Aetna, UnitedHealthcare",
-    upcoming: [
-      "9:00 AM - Intake review",
-      "11:30 AM - Sarah Kim - Intake",
-      "1:00 PM - Open slot",
-    ],
-    focus: "Medication follow-up, mood symptoms, intake review.",
-  },
-  {
-    id: "dr-ross",
-    name: "Dr Ross",
-    title: "Integrative Medicine Physician",
-    specialty: "Integrative Medicine",
-    license: "MD-61028",
-    npi: "1882930175",
-    email: "dr.ross@ihacareflow.com",
-    phone: "(555) 016-7300",
-    status: "Available",
-    todayAppointments: 4,
-    availableSlots: 4,
-    openNotes: 0,
-    nextAvailable: "Tomorrow 10:00 AM",
-    panelCount: 43,
-    highRiskPanel: 2,
-    capacity: 55,
-    location: "Main Clinic",
-    networkStatus: "BCBS, Self-pay",
-    upcoming: [
-      "1:00 PM - Avery Johnson - Follow-up",
-      "3:00 PM - Taylor Smith - Follow-up",
-      "4:00 PM - Open slot",
-    ],
-    focus: "Whole-person care, labs, fatigue, medication review.",
-  },
-  {
-    id: "dr-maria-chen",
-    name: "Dr Maria Chen",
-    title: "Psychiatrist",
-    specialty: "Psychiatry",
-    license: "MD-90441",
-    npi: "1902847291",
-    email: "maria.chen@ihacareflow.com",
-    phone: "(555) 014-6120",
-    status: "Credentialing",
-    todayAppointments: 0,
-    availableSlots: 0,
-    openNotes: 0,
-    nextAvailable: "Pending credentialing",
-    panelCount: 0,
-    highRiskPanel: 0,
-    capacity: 0,
-    location: "Pending assignment",
-    networkStatus: "Credentialing in progress",
-    upcoming: [
-      "Credentialing review",
-      "Insurance panel setup",
-      "Schedule template pending",
-    ],
-    focus: "Psychiatry and medication management.",
-  },
-];
 
 export default function DoctorsPage() {
   const [doctors, setDoctors] = React.useState<Doctor[]>([]);
@@ -299,36 +191,6 @@ export default function DoctorsPage() {
     },
   ];
 
-  async function seedDemoDoctors() {
-    if (doctors.length > 0) {
-      toast.info("Doctor records already exist in Firebase");
-      return;
-    }
-
-    setIsWriting(true);
-    try {
-      for (const doctor of demoDoctors) {
-        await addDoc(collection(db, "doctors"), {
-          ...doctorToFirestore(doctor),
-          source: "demo-doctor-directory",
-          createdBy: auth.currentUser?.uid ?? null,
-          createdByEmail: auth.currentUser?.email ?? null,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-      }
-
-      toast.success("Demo doctors added");
-    } catch (error) {
-      toast.error("Unable to seed doctors", {
-        description:
-          error instanceof Error ? error.message : "Please check Firestore rules.",
-      });
-    } finally {
-      setIsWriting(false);
-    }
-  }
-
   async function createDoctor() {
     if (!draft.name.trim()) {
       toast.error("Doctor name is required");
@@ -391,14 +253,6 @@ export default function DoctorsPage() {
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <Button
-            variant="outline"
-            onClick={seedDemoDoctors}
-            disabled={isWriting || doctors.length > 0}
-          >
-            <IconDatabaseImport />
-            Seed demo
-          </Button>
           <NewDoctorDialog
             open={dialogOpen}
             onOpenChange={setDialogOpen}
@@ -435,7 +289,7 @@ export default function DoctorsPage() {
                 <h3 className="font-semibold">Provider directory</h3>
                 <p className="text-muted-foreground text-sm">
                   {isLoading
-                    ? "Loading Firebase doctors"
+                    ? "Loading doctors"
                     : `${filteredDoctors.length} matching doctors`}
                 </p>
               </div>
@@ -719,7 +573,7 @@ function DoctorProfilePanel({
         <div className="text-center text-sm">
           <p className="font-medium">No doctor selected</p>
           <p className="text-muted-foreground mt-1">
-            Create a doctor profile or seed demo doctors.
+            Create a doctor profile to begin.
           </p>
         </div>
       </aside>

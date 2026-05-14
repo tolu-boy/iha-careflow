@@ -99,7 +99,6 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
   - File: `src/app/admin/billing/page.tsx`
   - Billing and insurance dashboard.
   - Reads from Firestore collection `billingRecords` with a live snapshot.
-  - Includes a `Seed demo records` button if demo billing data needs to be added to Firebase.
   - Summary cards at top.
   - Patient billing records table.
   - Search by patient/insurance/invoice.
@@ -121,7 +120,6 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
   - Clinical documentation workbench.
   - Reads/writes notes from Firestore collection `clinicalNotes`.
   - Reads Firestore `patients` so onboarding-created patients can appear in the New Note patient picker.
-  - Includes a `Seed demo notes` button if the Firebase `clinicalNotes` collection is empty.
   - Top bar:
     - New Note modal
     - Search
@@ -155,8 +153,7 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
   - Reads conversation metadata from Firestore collection `conversations`.
   - Reads message history from Firestore collection `messages`.
   - Reads Firestore `patients` so onboarding-created patients can be selected when starting a new conversation.
-  - Includes a `Seed demo` button if the Firebase messaging collections are empty.
-  - New Message modal creates a conversation and first provider message in Firebase.
+  - New Message modal creates a conversation and first provider message in Firestore.
   - Left panel:
     - Conversations list
     - Patient name
@@ -180,7 +177,6 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
   - File: `src/app/admin/patients/page.tsx`
   - Patient management directory.
   - Reads from Firestore collection `patients` with a live snapshot.
-  - Includes a `Seed demo` button if Firebase has no patient directory data yet.
   - Includes:
     - Summary cards for total patients, intake pending, high risk, billing gaps.
     - Search by patient/contact/provider.
@@ -195,7 +191,6 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
   - File: `src/app/admin/doctors/page.tsx`
   - Doctor management directory.
   - Reads/writes Firestore collection `doctors` with a live snapshot.
-  - Includes a `Seed demo` button if Firebase has no doctor directory data yet.
   - Includes:
     - Summary cards for active doctors, visits today, open notes, available slots.
     - Search by doctor/specialty/location/contact.
@@ -211,7 +206,6 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
   - Calendar-first scheduling dashboard.
   - Reads/writes appointments from Firestore collection `appointments`.
   - Reads Firestore `patients` so onboarding-created patients can appear in scheduling dropdowns.
-  - Includes a `Seed demo` button if the Firebase `appointments` collection is empty.
   - Top action bar:
     - New appointment modal
     - Calendar/Table display toggle

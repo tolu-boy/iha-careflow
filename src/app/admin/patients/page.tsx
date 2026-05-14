@@ -5,7 +5,6 @@ import {
   IconActivityHeartbeat,
   IconCalendarPlus,
   IconClipboardCheck,
-  IconDatabaseImport,
   IconFileText,
   IconMail,
   IconPhone,
@@ -15,7 +14,6 @@ import {
   IconUsersGroup,
 } from "@tabler/icons-react";
 import {
-  addDoc,
   collection,
   doc,
   onSnapshot,
@@ -42,7 +40,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { auth, db } from "@/lib/firebase";
+import { db } from "@/lib/firebase";
 import type {
   InsuranceStatus,
   Patient,
@@ -80,129 +78,6 @@ const insuranceStatuses: InsuranceStatus[] = [
   "Verified",
   "Pending",
   "Missing Info",
-];
-
-const demoPatients: Patient[] = [
-  {
-    id: "john-doe",
-    name: "John Doe",
-    age: 34,
-    dob: "1992-03-18",
-    gender: "Male",
-    phone: "(555) 014-2100",
-    email: "john.doe@email.com",
-    emergencyContact: "Maria Doe - (555) 019-8821",
-    status: "Active",
-    risk: "Medium",
-    provider: "Dr Smith",
-    reason: "Anxiety and sleep disruption",
-    nextAppointment: "May 14, 10:00 AM",
-    insurancePlan: "Aetna",
-    memberId: "AET-47291",
-    insuranceStatus: "Verified",
-    onboardingComplete: true,
-    consentSigned: true,
-    openNotes: 1,
-    balance: "$35.00",
-    lastMessage: "Sleep symptoms updated this morning.",
-    carePlan: "Weekly therapy with medication monitoring.",
-  },
-  {
-    id: "sarah-kim",
-    name: "Sarah Kim",
-    age: 29,
-    dob: "1997-10-04",
-    gender: "Female",
-    phone: "(555) 018-4430",
-    email: "sarah.kim@email.com",
-    emergencyContact: "Daniel Kim - (555) 013-0021",
-    status: "Intake Pending",
-    risk: "Low",
-    provider: "Dr Lee",
-    reason: "Medication follow-up",
-    nextAppointment: "May 14, 11:30 AM",
-    insurancePlan: "BlueCross BlueShield",
-    memberId: "BCBS-88421",
-    insuranceStatus: "Pending",
-    onboardingComplete: false,
-    consentSigned: true,
-    openNotes: 0,
-    balance: "$0.00",
-    lastMessage: "Asked to confirm appointment time.",
-    carePlan: "Intake review before provider assignment.",
-  },
-  {
-    id: "mike-johnson",
-    name: "Mike Johnson",
-    age: 42,
-    dob: "1984-06-22",
-    gender: "Male",
-    phone: "(555) 016-9944",
-    email: "mike.johnson@email.com",
-    emergencyContact: "Alicia Johnson - (555) 011-4490",
-    status: "Care Review",
-    risk: "High",
-    provider: "Dr Smith",
-    reason: "Sleep disturbance and fatigue",
-    nextAppointment: "May 14, 10:00 AM",
-    insurancePlan: "Cigna",
-    memberId: "CIG-11820",
-    insuranceStatus: "Verified",
-    onboardingComplete: true,
-    consentSigned: true,
-    openNotes: 2,
-    balance: "$60.00 est.",
-    lastMessage: "Lab results uploaded.",
-    carePlan: "Review labs, sleep history, and medication response.",
-  },
-  {
-    id: "avery-johnson",
-    name: "Avery Johnson",
-    age: 35,
-    dob: "1991-04-18",
-    gender: "Female",
-    phone: "(555) 015-2218",
-    email: "avery.johnson@email.com",
-    emergencyContact: "Chris Johnson - (555) 015-7720",
-    status: "Active",
-    risk: "Low",
-    provider: "Dr Ross",
-    reason: "Medication check",
-    nextAppointment: "May 15, 1:00 PM",
-    insurancePlan: "Aetna",
-    memberId: "AET-53177",
-    insuranceStatus: "Verified",
-    onboardingComplete: true,
-    consentSigned: true,
-    openNotes: 0,
-    balance: "$0.00",
-    lastMessage: "No new messages.",
-    carePlan: "Monthly medication management.",
-  },
-  {
-    id: "jordan-rivera",
-    name: "Jordan Rivera",
-    age: 30,
-    dob: "1996-12-11",
-    gender: "Non-binary",
-    phone: "(555) 010-6811",
-    email: "jordan.rivera@email.com",
-    emergencyContact: "Pat Rivera - (555) 012-3308",
-    status: "Intake Pending",
-    risk: "Medium",
-    provider: "Dr Lee",
-    reason: "Initial consult",
-    nextAppointment: "Not scheduled",
-    insurancePlan: "UnitedHealthcare",
-    memberId: "Missing",
-    insuranceStatus: "Missing Info",
-    onboardingComplete: true,
-    consentSigned: false,
-    openNotes: 0,
-    balance: "Unknown",
-    lastMessage: "Needs insurance card upload.",
-    carePlan: "Complete billing readiness before scheduling.",
-  },
 ];
 
 export default function PatientsPage() {
@@ -265,7 +140,7 @@ export default function PatientsPage() {
     {
       label: "Total patients",
       value: patients.length.toString(),
-      note: "Profiles in Firebase",
+      note: "Profiles in care directory",
       icon: IconUsersGroup,
     },
     {
@@ -293,36 +168,6 @@ export default function PatientsPage() {
       icon: IconShieldCheck,
     },
   ];
-
-  async function seedDemoPatients() {
-    if (patients.length > 0) {
-      toast.info("Patient records already exist in Firebase");
-      return;
-    }
-
-    setIsWriting(true);
-    try {
-      for (const patient of demoPatients) {
-        await addDoc(collection(db, "patients"), {
-          ...patientToFirestore(patient),
-          source: "demo-patient-directory",
-          createdBy: auth.currentUser?.uid ?? null,
-          createdByEmail: auth.currentUser?.email ?? null,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-      }
-
-      toast.success("Demo patients added");
-    } catch (error) {
-      toast.error("Unable to seed patients", {
-        description:
-          error instanceof Error ? error.message : "Please check Firestore rules.",
-      });
-    } finally {
-      setIsWriting(false);
-    }
-  }
 
   async function updatePatient(patientId: string, patch: Partial<Patient>) {
     setIsWriting(true);
@@ -352,14 +197,6 @@ export default function PatientsPage() {
             connected care workflows.
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={seedDemoPatients}
-          disabled={isWriting || patients.length > 0}
-        >
-          <IconDatabaseImport />
-          Seed demo
-        </Button>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -387,7 +224,7 @@ export default function PatientsPage() {
                 <h3 className="font-semibold">Patient directory</h3>
                 <p className="text-muted-foreground text-sm">
                   {isLoading
-                    ? "Loading Firebase profiles"
+                    ? "Loading patient profiles"
                     : `${filteredPatients.length} matching profiles`}
                 </p>
               </div>
@@ -559,7 +396,7 @@ function PatientProfilePanel({
         <div className="text-center text-sm">
           <p className="font-medium">No patient selected</p>
           <p className="text-muted-foreground mt-1">
-            Add onboarding records or seed demo patients.
+            Add onboarding records to begin.
           </p>
         </div>
       </aside>
@@ -854,35 +691,6 @@ function toPatient(id: string, data: Record<string, unknown>): Patient {
       data.carePlan,
       "Review intake, billing readiness, and next appointment needs.",
     ),
-  };
-}
-
-function patientToFirestore(patient: Patient) {
-  return {
-    fullName: patient.name,
-    name: patient.name,
-    dateOfBirth: patient.dob,
-    dob: patient.dob,
-    gender: patient.gender,
-    phone: patient.phone,
-    email: patient.email,
-    emergencyContact: patient.emergencyContact,
-    status: patient.status,
-    risk: patient.risk,
-    provider: patient.provider,
-    reason: patient.reason,
-    reasonForVisit: patient.reason,
-    nextAppointment: patient.nextAppointment,
-    insuranceProvider: patient.insurancePlan,
-    insurancePlan: patient.insurancePlan,
-    memberId: patient.memberId,
-    insuranceStatus: patient.insuranceStatus,
-    onboardingComplete: patient.onboardingComplete,
-    consentSigned: patient.consentSigned,
-    openNotes: patient.openNotes,
-    balance: patient.balance,
-    lastMessage: patient.lastMessage,
-    carePlan: patient.carePlan,
   };
 }
 

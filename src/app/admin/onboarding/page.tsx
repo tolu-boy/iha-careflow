@@ -145,7 +145,7 @@ export default function PatientOnboardingPage() {
       });
     } catch {
       const message =
-        "Unable to save this patient data. Please check Firebase permissions and try again.";
+        "Unable to save this patient data. Please check permissions and try again.";
 
       setSaveError(message);
       toast.error("Patient data was not saved", {
