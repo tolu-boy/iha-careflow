@@ -1,12 +1,12 @@
 # IHA CareFlow Project Memory
 
-Last updated: 2026-05-13
+Last updated: 2026-05-14
 
 ## Project Overview
 
 `iha-careflow` is a Next.js 16 App Router application for Integrative Healthcare Alliance care operations. The current priority is UI-first. Firebase has been initialized, Firebase Auth is wired for login/register/logout, admin user profiles save to Firestore, and onboarding saves new patient data to Firestore.
 
-The app was adapted from a shadcn-style admin dashboard reference, but Convex and Clerk were intentionally removed. Patient/provider directory data now lives in a Zustand store; other workflow data is still static/local component state.
+The app was adapted from a shadcn-style admin dashboard reference, but Convex and Clerk were intentionally removed. Patient/doctor directory data still has a Zustand-backed seed store, while the major workflow pages are progressively being moved to Firestore.
 
 ## Local Dev Notes
 
@@ -29,7 +29,7 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
 - Firestore rules/config files exist locally for project `iha-careflow`.
 - Global state:
   - Auth/session state in `src/stores/auth-store.ts`.
-  - Patient/provider workflow state in `src/stores/careflow-store.ts`.
+  - Patient/doctor seed workflow state in `src/stores/careflow-store.ts`.
 - Styling: Tailwind CSS v4 via `src/app/globals.css`.
 - Component style: shadcn/ui-style primitives under `src/components/ui`.
 - Icons: `@tabler/icons-react` mostly, plus some `lucide-react` inside shadcn primitives.
@@ -119,6 +119,9 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
 - `/admin/clinical-notes`
   - File: `src/app/admin/clinical-notes/page.tsx`
   - Clinical documentation workbench.
+  - Reads/writes notes from Firestore collection `clinicalNotes`.
+  - Reads Firestore `patients` so onboarding-created patients can appear in the New Note patient picker.
+  - Includes a `Seed demo notes` button if the Firebase `clinicalNotes` collection is empty.
   - Top bar:
     - New Note modal
     - Search
@@ -141,12 +144,19 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
     - Search/select patient
     - Select appointment filtered by selected patient
     - Select note type: SOAP, Progress Note, Intake Note, Follow-up
-    - Creates note and opens it immediately.
+    - Creates note in Firestore and opens it immediately.
+  - Save updates SOAP fields and moves status to `Ready`.
+  - Sign note updates SOAP fields, marks status `Signed`, and stores `signedAt`.
   - Patient tags were removed from the modal and moved to the context panel.
 
 - `/admin/messages`
   - File: `src/app/admin/messages/page.tsx`
   - Patient-provider messaging workspace.
+  - Reads conversation metadata from Firestore collection `conversations`.
+  - Reads message history from Firestore collection `messages`.
+  - Reads Firestore `patients` so onboarding-created patients can be selected when starting a new conversation.
+  - Includes a `Seed demo` button if the Firebase messaging collections are empty.
+  - New Message modal creates a conversation and first provider message in Firebase.
   - Left panel:
     - Conversations list
     - Patient name
@@ -154,7 +164,7 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
     - Time
     - Status badge
     - Search patients
-  - Right panel:
+  - Main/right panels:
     - Patient summary header
     - Upcoming appointment
     - Provider
@@ -162,62 +172,81 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
     - Message history
     - Quick actions
     - Message input and Send button
-  - Sending a message appends it locally and updates last message/status.
+  - Sending a message creates a `messages` doc and updates the linked `conversations` doc with last message, status, and timestamp.
+  - Resolve updates conversation status in Firestore.
+  - Quick actions write provider messages for intake reminders, symptom updates, and escalation.
 
 - `/admin/patients`
   - File: `src/app/admin/patients/page.tsx`
   - Patient management directory.
-  - UI-only/local state.
+  - Reads from Firestore collection `patients` with a live snapshot.
+  - Includes a `Seed demo` button if Firebase has no patient directory data yet.
   - Includes:
     - Summary cards for total patients, intake pending, high risk, billing gaps.
     - Search by patient/contact/provider.
     - Status and risk filters.
     - Patient table with status, risk, provider, next appointment, billing readiness.
     - Right patient profile panel with contact, care readiness checklist, insurance/billing, workflow actions, and care context.
+    - Right-panel management controls for patient status, risk level, and insurance readiness.
   - Connects patient profile data to onboarding, billing, scheduling, messages, and clinical notes.
+  - Onboarding-created records are mapped into the directory from fields such as `fullName`, `dateOfBirth`, `reasonForVisit`, `insuranceProvider`, and `memberId`.
 
 - `/admin/doctors`
   - File: `src/app/admin/doctors/page.tsx`
-  - Doctor/provider management directory.
-  - UI-only/local state.
+  - Doctor management directory.
+  - Reads/writes Firestore collection `doctors` with a live snapshot.
+  - Includes a `Seed demo` button if Firebase has no doctor directory data yet.
   - Includes:
     - Summary cards for active doctors, visits today, open notes, available slots.
     - Search by doctor/specialty/location/contact.
     - Specialty and status filters.
-    - Provider table with status, daily visits, next availability, open notes.
-    - `New doctor` modal that creates a local provider record.
-    - Right provider profile panel with credentials, schedule capacity, patient panel, today's workflow, and quick actions.
-  - Connects providers to scheduling capacity, notes ownership, and patient panel management.
+    - Doctor table with status, daily visits, next availability, open notes.
+    - `New doctor` modal that creates a doctor document in Firestore.
+    - Right doctor profile panel with credentials, schedule capacity, patient panel, today's workflow, and quick actions.
+    - Right-panel management controls for doctor status and specialty.
+  - Connects doctors to scheduling capacity, notes ownership, and patient panel management.
 
 - `/admin/scheduling`
   - File: `src/app/admin/scheduling/page.tsx`
   - Calendar-first scheduling dashboard.
+  - Reads/writes appointments from Firestore collection `appointments`.
+  - Reads Firestore `patients` so onboarding-created patients can appear in scheduling dropdowns.
+  - Includes a `Seed demo` button if the Firebase `appointments` collection is empty.
   - Top action bar:
     - New appointment modal
-    - Today/Week/Month toggle
+    - Calendar/Table display toggle
+    - Day/Week/Month range toggle
     - Prev/next arrows
     - Provider filter
   - Automation banner:
-    - “5 patients have appointments tomorrow with no confirmation. Send reminders?”
-    - `Send All` changes to `Reminders Sent`.
+    - Shows pending unconfirmed appointments for tomorrow.
+    - `Send All` writes `reminderSentAt` to matching appointment docs.
   - Left panel:
     - Mini monthly calendar.
     - Dates with appointments highlighted.
     - Click date to select appointment on that date.
   - Main area:
-    - Weekly grid with 7 day columns and time slots on left.
-    - Appointment blocks display patient, type, provider, and status color.
+    - Calendar mode shows a day or week time-grid.
+    - Table mode shows appointments for Day, Week, or full Month.
+    - Appointment blocks/rows display patient, type, provider, and status color.
   - Right panel:
     - Appointment detail with avatar, patient, date/time/duration, type, provider, status/risk.
-    - Actions: Confirm, Reschedule, Cancel, Reminder.
+    - Actions update Firestore: Confirm, Reschedule, Cancel, Reminder.
     - Quick links: Start Session, Start note, Message patient, View billing.
   - New appointment modal:
     - Patient
     - Provider
-    - Day
+    - Exact May 2026 date
     - Time
     - Type
-    - Creates a pending appointment directly on the calendar.
+    - Creates a pending appointment in Firestore directly on the calendar.
+  - Reschedule modal:
+    - Updates provider/date/time/type in Firestore.
+    - Marks appointment `Pending` after reschedule so it can be reconfirmed.
+  - New appointment and reschedule flows check for provider/day/time conflicts before saving.
+  - Mini calendar shows real May 2026 date placement and only valid dates 1-31.
+  - Weekly grid is constrained to show all seven day columns in the center panel.
+  - Month mode switches to the table view so appointments outside the visible week are still visible.
 
 ## Shared Components / Important Files
 
@@ -247,9 +276,9 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
   - Reads Firebase config from `NEXT_PUBLIC_FIREBASE_*` environment variables instead of hardcoded source values.
 
 - `src/stores/careflow-store.ts`
-  - Zustand store for global patient/provider directory state.
+  - Zustand store for seed patient/doctor directory state.
   - Exports shared `Patient`, `Doctor`, status, risk, and insurance types.
-  - Stores active patient/provider IDs and supports adding providers from the Doctors page.
+  - Stores active patient/doctor IDs and supports old local doctor seeds.
 
 - `src/stores/auth-store.ts`
   - Zustand auth/session store.
@@ -321,12 +350,14 @@ Firestore persistence has started with auth profiles and onboarding patient reco
 
 - `patients`
   - Core patient profile.
-  - Currently written by `/admin/onboarding`.
+  - Currently written by `/admin/onboarding` and read/updated by `/admin/patients`.
   - Fields include `fullName`, `dateOfBirth`, `gender`, `phone`, `email`, emergency contact fields, `reasonForVisit`, `symptoms`, medical history, medications, allergies, insurance provider, member ID, billing preference, `status`, `source`, `onboardingComplete`, `createdBy`, `createdByEmail`, `createdAt`, and `updatedAt`.
+  - Directory-friendly fields may also exist, including `name`, `dob`, `risk`, `provider`, `nextAppointment`, `insurancePlan`, `insuranceStatus`, `consentSigned`, `openNotes`, `balance`, `lastMessage`, and `carePlan`.
 
-- `providers`
-  - Doctor/provider profile and schedule capacity.
-  - Fields: `displayName`, `title`, `specialty`, `license`, `npi`, `email`, `phone`, `status`, `location`, `networkStatus`, `panelCount`, `availableSlots`, `createdAt`.
+- `doctors`
+  - Doctor profile and schedule capacity.
+  - Currently read/written by `/admin/doctors`.
+  - Fields include `name`, `displayName`, `title`, `specialty`, `license`, `npi`, `email`, `phone`, `status`, `todayAppointments`, `availableSlots`, `openNotes`, `nextAvailable`, `panelCount`, `highRiskPanel`, `capacity`, `location`, `networkStatus`, `upcoming`, `focus`, `createdBy`, `createdByEmail`, `createdAt`, and `updatedAt`.
 
 - `insuranceRecords`
   - Billing readiness and insurance verification.
@@ -339,19 +370,23 @@ Firestore persistence has started with auth profiles and onboarding patient reco
 
 - `appointments`
   - Scheduling records.
-  - Fields: `patientId`, `providerId`, `date`, `startTime`, `endTime`, `type`, `status`, `riskLevel`, `onboardingComplete`, `insuranceVerified`, `consentSigned`, `reminderStatus`.
+  - Currently read/written by `/admin/scheduling`.
+  - Fields include `patient`, `provider`, `day`, `date`, `time`, `duration`, `type`, `status`, `risk`, `reason`, `billing`, `notes`, `message`, `reminderSentAt`, `createdBy`, `createdByEmail`, `createdAt`, and `updatedAt`.
 
 - `clinicalNotes`
   - SOAP/progress/intake/follow-up notes.
-  - Fields: `patientId`, `appointmentId`, `providerId`, `noteType`, `status`, `subjective`, `objective`, `assessment`, `plan`, `signedAt`, `createdAt`, `updatedAt`.
+  - Currently read/written by `/admin/clinical-notes`.
+  - Fields include `patientId`, `patientName`, `patientAge`, `patientReason`, `patientRisk`, `patientInsurance`, `patientMemberId`, `appointmentId`, `appointmentLabel`, `appointmentTime`, `provider`, `date`, `noteType`, `status`, `subjective`, `objective`, `assessment`, `plan`, `signedAt`, `createdBy`, `createdByEmail`, `createdAt`, and `updatedAt`.
 
 - `conversations`
   - Patient-provider message threads.
-  - Fields: `patientId`, `providerId`, `status`, `riskLevel`, `lastMessage`, `lastMessageAt`.
+  - Currently read/written by `/admin/messages`.
+  - Fields include `patientId`, `patient`, `phone`, `appointment`, `provider`, `risk`, `status`, `lastMessage`, `lastMessageAt`, `time`, `createdBy`, `createdByEmail`, `createdAt`, and `updatedAt`.
 
 - `messages`
   - Individual conversation messages.
-  - Fields: `conversationId`, `senderId`, `senderType`, `body`, `readAt`, `createdAt`.
+  - Currently read/written by `/admin/messages`.
+  - Fields include `conversationId`, `sender`, `senderId`, `senderType`, `body`, `time`, `sequence`, `readAt`, and `createdAt`.
 
 - `auditLogs`
   - Important for healthcare admin actions.
@@ -447,35 +482,54 @@ Cross-page relationships already represented in UI:
   - invoice PDF download
   - billing notes persistence
 - Clinical Notes workbench:
+  - Firestore live data from `clinicalNotes`
+  - patient picker can include Firestore `patients`
   - notes list
   - SOAP editor
   - new note modal
   - patient context panel
   - improved SOAP section visibility/scrolling
+  - save/sign persistence
 - Patient Messages workspace:
+  - Firestore live data from `conversations`
+  - Firestore live data from `messages`
+  - Firestore `patients` are available in the New Message modal
   - conversations list
   - patient summary
   - message history
-  - quick actions
-  - local send behavior
+  - new message modal
+  - provider message sending persistence
+  - resolve conversation persistence
+  - quick-action message persistence
 - Patients directory:
+  - Firestore live data from `patients`
+  - onboarding-created patient records appear in the directory
   - search and status/risk filters
   - summary cards
   - patient table
   - profile/readiness detail panel
+  - status, risk, and insurance readiness persistence
 - Doctors directory:
+  - Firestore live data from `doctors`
   - search and specialty/status filters
   - summary cards
   - doctor table
-  - new doctor modal
-  - provider capacity/profile detail panel
+  - new doctor modal with Firestore persistence
+  - doctor capacity/profile detail panel
+  - doctor status and specialty persistence
 - Scheduling calendar:
+  - Firestore live data from `appointments`
+  - patient dropdown can include Firestore `patients`
   - mini calendar
-  - weekly grid
+  - calendar/table display toggle
+  - day/week/month range toggle
+  - day/week calendar grid
+  - day/week/month appointment table
   - provider filter
   - new appointment modal
   - reminder automation banner
   - appointment detail panel
+  - confirm/cancel/reminder/reschedule persistence
 - `pnpm lint` and `pnpm build` have passed after latest feature work.
 
 ## Pending TODOs
@@ -501,13 +555,11 @@ Cross-page relationships already represented in UI:
 ### Workflow Enhancements
 
 - Patients:
-  - Persist patient profiles.
   - Add edit/archive flows.
   - Add shared patient profile component used across notes/messages/scheduling/billing.
   - Link each patient to intakes, appointments, notes, billing, and conversations.
 
 - Doctors:
-  - Persist provider profiles.
   - Add edit/deactivate flows.
   - Add schedule template management.
   - Add patient panel assignment and capacity rules.
@@ -524,24 +576,23 @@ Cross-page relationships already represented in UI:
   - Insurance verification status transitions.
 
 - Clinical Notes:
-  - Provider-only signing.
   - Required fields by note type.
   - Version history.
   - Print/export note.
+  - Provider-only signing/RBAC enforcement.
 
 - Messages:
-  - Read/unread state.
+  - Read/unread transitions beyond manual status.
   - Attachments.
-  - Escalation to provider.
+  - Real escalation assignment to a provider.
   - Message templates.
+  - Real portal/email/SMS delivery instead of Firestore-only demo persistence.
 
 - Scheduling:
-  - Real conflict detection by provider/date/time.
   - Calendar date navigation.
   - Real Today/Week/Month views.
-  - Appointment status persistence.
-  - Reminder delivery status.
-  - Reschedule/cancel flows.
+  - Real reminder delivery via email/SMS.
+  - Provider availability templates.
 
 ### UI Polish
 
