@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import {
-  IconDatabaseImport,
   IconDeviceFloppy,
   IconFilter,
   IconId,
@@ -162,81 +161,6 @@ const demoPatients: Patient[] = [
   },
 ];
 
-const demoNotes: Omit<ClinicalNote, "id">[] = [
-  {
-    patientId: "john-doe",
-    patientName: "John Doe",
-    patientAge: 34,
-    patientReason: "Anxiety",
-    patientRisk: "Medium",
-    patientInsurance: "Aetna",
-    patientMemberId: "AET-47291",
-    noteType: "SOAP",
-    appointmentId: "john-may-13",
-    appointmentLabel: "May 13 - Therapy Session",
-    appointmentTime: "10:00 AM",
-    provider: "Dr Smith",
-    date: "May 13",
-    status: "Draft",
-    subjective:
-      "Patient reports increased anxiety in the evenings, racing thoughts, and difficulty initiating sleep.",
-    objective:
-      "Patient is alert and oriented. Speech is clear. Affect anxious but congruent. No acute distress observed.",
-    assessment:
-      "Generalized anxiety symptoms remain active. Patient is engaged and using breathing exercises inconsistently.",
-    plan:
-      "Continue current treatment plan. Practice evening wind-down routine. Follow up in two weeks.",
-  },
-  {
-    patientId: "sarah-kim",
-    patientName: "Sarah Kim",
-    patientAge: 29,
-    patientReason: "Medication follow-up",
-    patientRisk: "Low",
-    patientInsurance: "BlueCross BlueShield",
-    patientMemberId: "BCBS-88421",
-    noteType: "Progress Note",
-    appointmentId: "sarah-may-13",
-    appointmentLabel: "May 13 - Medication Review",
-    appointmentTime: "11:30 AM",
-    provider: "Dr Chen",
-    date: "May 13",
-    status: "Ready",
-    subjective:
-      "Patient reports improved mood stability and mild morning nausea after medication adjustment.",
-    objective:
-      "Patient appears well groomed, cooperative, and engaged. No psychomotor agitation noted.",
-    assessment:
-      "Medication response is positive with tolerable side effects. Continue monitoring nausea.",
-    plan:
-      "Maintain current dose. Take medication with food. Reassess side effects at next visit.",
-  },
-  {
-    patientId: "mike-johnson",
-    patientName: "Mike Johnson",
-    patientAge: 42,
-    patientReason: "Sleep disturbance",
-    patientRisk: "High",
-    patientInsurance: "Cigna",
-    patientMemberId: "CIG-11820",
-    noteType: "Intake Note",
-    appointmentId: "mike-may-14",
-    appointmentLabel: "May 14 - Intake Note",
-    appointmentTime: "1:00 PM",
-    provider: "Dr Ross",
-    date: "May 14",
-    status: "Draft",
-    subjective:
-      "Patient describes fragmented sleep, daytime fatigue, and increased irritability over the last month.",
-    objective:
-      "Patient appears tired but attentive. Thought process linear. Denies acute safety concerns.",
-    assessment:
-      "Sleep disturbance may be contributing to mood and concentration concerns. Further evaluation needed.",
-    plan:
-      "Review sleep diary, order labs, and discuss sleep hygiene. Schedule follow-up after results.",
-  },
-];
-
 const noteTypes: Array<NoteType | "All"> = [
   "All",
   "SOAP",
@@ -284,7 +208,6 @@ export default function ClinicalNotesPage() {
     {},
   );
   const [isLoading, setIsLoading] = React.useState(true);
-  const [isSeeding, setIsSeeding] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
   const [search, setSearch] = React.useState("");
   const [filter, setFilter] = React.useState<(typeof noteTypes)[number]>("All");
@@ -323,7 +246,7 @@ export default function ClinicalNotesPage() {
       () => {
         setIsLoading(false);
         toast.error("Unable to load clinical notes", {
-          description: "Check Firebase permissions for clinicalNotes.",
+          description: "Check clinical note permissions and try again.",
         });
       },
     );
@@ -403,34 +326,6 @@ export default function ClinicalNotesPage() {
     setNewAppointmentId(patient.appointments[0].id);
   }
 
-  async function seedDemoNotes() {
-    setIsSeeding(true);
-
-    try {
-      await Promise.all(
-        demoNotes.map((note) =>
-          addDoc(collection(db, "clinicalNotes"), {
-            ...note,
-            createdBy: auth.currentUser?.uid ?? null,
-            createdByEmail: auth.currentUser?.email ?? null,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          }),
-        ),
-      );
-
-      toast.success("Demo clinical notes added", {
-        description: "The notes workspace is now using Firestore data.",
-      });
-    } catch {
-      toast.error("Unable to add demo notes", {
-        description: "Check Firebase permissions for clinicalNotes.",
-      });
-    } finally {
-      setIsSeeding(false);
-    }
-  }
-
   async function createNote() {
     const patient =
       patients.find((item) => item.id === newPatientId) ?? patients[0];
@@ -471,7 +366,7 @@ export default function ClinicalNotesPage() {
       });
     } catch {
       toast.error("Clinical note was not created", {
-        description: "Firebase could not save the new note.",
+        description: "The new note could not be saved.",
       });
     }
   }
@@ -501,11 +396,11 @@ export default function ClinicalNotesPage() {
       });
 
       toast.success(nextStatus === "Signed" ? "Clinical note signed" : "Clinical note saved", {
-        description: `${activeNote.patientName}'s note was updated in Firebase.`,
+        description: `${activeNote.patientName}'s note was updated.`,
       });
     } catch {
       toast.error("Clinical note was not saved", {
-        description: "Firebase could not update this note.",
+        description: "This note could not be updated.",
       });
     } finally {
       setIsSaving(false);
@@ -525,18 +420,6 @@ export default function ClinicalNotesPage() {
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Button
-            variant="outline"
-            onClick={seedDemoNotes}
-            disabled={isSeeding || notes.length > 0}
-          >
-            <IconDatabaseImport />
-            {notes.length > 0
-              ? "Firebase connected"
-              : isSeeding
-                ? "Adding..."
-                : "Seed demo notes"}
-          </Button>
           <NewNoteDialog
             open={modalOpen}
             onOpenChange={setModalOpen}
@@ -751,8 +634,8 @@ export default function ClinicalNotesPage() {
             </h3>
             <p className="text-muted-foreground mt-2 text-sm">
               {isLoading
-                ? "Fetching note records from Firebase."
-                : "Create a new note or seed demo notes to start documenting care."}
+                ? "Loading note records."
+                : "Create a new note to start documenting care."}
             </p>
           </div>
         </div>

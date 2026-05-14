@@ -5,7 +5,6 @@ import {
   IconAlertTriangle,
   IconChecklist,
   IconCreditCard,
-  IconDatabaseImport,
   IconDownload,
   IconFileInvoice,
   IconId,
@@ -15,7 +14,6 @@ import {
   IconShieldCheck,
 } from "@tabler/icons-react";
 import {
-  addDoc,
   collection,
   doc,
   onSnapshot,
@@ -61,7 +59,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { auth, db } from "@/lib/firebase";
+import { db } from "@/lib/firebase";
 
 type BillingStatus = "Verified" | "Pending" | "Missing Info";
 type StatusFilter = BillingStatus | "All";
@@ -86,99 +84,6 @@ type BillingRecord = {
   }[];
 };
 
-const demoRecords: Omit<BillingRecord, "id">[] = [
-  {
-    patient: "Avery Johnson",
-    dateOfBirth: "1991-04-18",
-    provider: "Dr. Maria Chen",
-    appointment: "May 14, 10:00 AM",
-    insurance: "Aetna",
-    memberId: "AET-47291",
-    status: "Verified",
-    balance: "$35.00",
-    invoice: "INV-1048",
-    cardStatus: "Front and back uploaded",
-    notes: "Benefits confirmed. Patient prefers card on file for copay.",
-    breakdown: [
-      { label: "Initial psychiatry evaluation", amount: "$325.00" },
-      { label: "Insurance estimate", amount: "-$245.00" },
-      { label: "Patient copay", amount: "$35.00" },
-    ],
-  },
-  {
-    patient: "Morgan Lee",
-    dateOfBirth: "1987-09-02",
-    provider: "Dr. Maria Chen",
-    appointment: "May 15, 1:30 PM",
-    insurance: "BlueCross BlueShield",
-    memberId: "BCBS-88421",
-    status: "Pending",
-    balance: "$0.00",
-    invoice: "Draft",
-    cardStatus: "Card uploaded, awaiting verification",
-    notes: "Eligibility portal timed out. Recheck before appointment reminder.",
-    breakdown: [
-      { label: "Medication management visit", amount: "$185.00" },
-      { label: "Estimated insurance", amount: "Pending" },
-      { label: "Patient balance", amount: "Pending" },
-    ],
-  },
-  {
-    patient: "Jordan Rivera",
-    dateOfBirth: "1996-12-11",
-    provider: "Dr. Natalie Ross",
-    appointment: "May 16, 9:00 AM",
-    insurance: "UnitedHealthcare",
-    memberId: "Missing",
-    status: "Missing Info",
-    balance: "Unknown",
-    invoice: "Hold",
-    cardStatus: "Insurance card missing",
-    notes: "Patient needs to upload card and confirm subscriber details.",
-    breakdown: [
-      { label: "Initial consult", amount: "$325.00" },
-      { label: "Insurance estimate", amount: "Missing info" },
-      { label: "Patient balance", amount: "Unknown" },
-    ],
-  },
-  {
-    patient: "Taylor Smith",
-    dateOfBirth: "1979-06-24",
-    provider: "Dr. Natalie Ross",
-    appointment: "May 16, 3:00 PM",
-    insurance: "Self-pay",
-    memberId: "N/A",
-    status: "Verified",
-    balance: "$185.00",
-    invoice: "INV-1051",
-    cardStatus: "No insurance card required",
-    notes: "Self-pay agreement acknowledged.",
-    breakdown: [
-      { label: "Follow-up visit", amount: "$185.00" },
-      { label: "Discounts", amount: "$0.00" },
-      { label: "Patient balance", amount: "$185.00" },
-    ],
-  },
-  {
-    patient: "Riley Patel",
-    dateOfBirth: "1993-01-30",
-    provider: "Dr. Maria Chen",
-    appointment: "May 17, 11:00 AM",
-    insurance: "Cigna",
-    memberId: "CIG-11820",
-    status: "Pending",
-    balance: "$60.00 est.",
-    invoice: "Draft",
-    cardStatus: "Front uploaded, back missing",
-    notes: "Need back of card and deductible confirmation.",
-    breakdown: [
-      { label: "Therapy intake", amount: "$250.00" },
-      { label: "Insurance estimate", amount: "-$190.00" },
-      { label: "Estimated patient balance", amount: "$60.00" },
-    ],
-  },
-];
-
 const statusStyles: Record<BillingStatus, string> = {
   Verified: "border-emerald-200 bg-emerald-50 text-emerald-700",
   Pending: "border-amber-200 bg-amber-50 text-amber-700",
@@ -190,7 +95,6 @@ const currencyPattern = /-?\$?[\d,]+(?:\.\d{2})?/;
 export default function BillingPage() {
   const [records, setRecords] = React.useState<BillingRecord[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
-  const [isSeeding, setIsSeeding] = React.useState(false);
   const [search, setSearch] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("All");
 
@@ -208,7 +112,7 @@ export default function BillingPage() {
       () => {
         setIsLoading(false);
         toast.error("Unable to load billing records", {
-          description: "Check Firebase permissions for billingRecords.",
+          description: "Check billing record permissions and try again.",
         });
       },
     );
@@ -271,34 +175,6 @@ export default function BillingPage() {
     ];
   }, [records]);
 
-  async function seedDemoRecords() {
-    setIsSeeding(true);
-
-    try {
-      await Promise.all(
-        demoRecords.map((record) =>
-          addDoc(collection(db, "billingRecords"), {
-            ...record,
-            createdBy: auth.currentUser?.uid ?? null,
-            createdByEmail: auth.currentUser?.email ?? null,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          }),
-        ),
-      );
-
-      toast.success("Demo billing records added", {
-        description: "The Billing & Insurance dashboard is now using Firestore data.",
-      });
-    } catch {
-      toast.error("Unable to add demo records", {
-        description: "Check Firebase permissions for billingRecords.",
-      });
-    } finally {
-      setIsSeeding(false);
-    }
-  }
-
   async function sendReminder(record: BillingRecord) {
     try {
       await updateDoc(doc(db, "billingRecords", record.id), {
@@ -310,7 +186,7 @@ export default function BillingPage() {
       });
     } catch {
       toast.error("Reminder was not sent", {
-        description: "Firebase could not update this billing record.",
+        description: "This billing record could not be updated.",
       });
     }
   }
@@ -389,19 +265,6 @@ export default function BillingPage() {
                 </Select>
               </div>
               <div className="flex flex-col gap-2 sm:flex-row">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={seedDemoRecords}
-                  disabled={isSeeding || records.length > 0}
-                >
-                  <IconDatabaseImport />
-                  {records.length > 0
-                    ? "Firebase connected"
-                    : isSeeding
-                      ? "Adding..."
-                      : "Seed demo records"}
-                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -485,9 +348,9 @@ export default function BillingPage() {
                         className="text-muted-foreground h-24 text-center"
                       >
                         {isLoading
-                          ? "Loading billing records from Firebase..."
+                          ? "Loading billing records..."
                           : records.length === 0
-                            ? "No billing records in Firebase yet. Seed demo records to start."
+                            ? "No billing records yet."
                             : "No billing records match this view."}
                       </TableCell>
                     </TableRow>
@@ -520,7 +383,7 @@ function BillingDetailsDrawer({ record }: { record: BillingRecord }) {
       });
     } catch {
       toast.error("Billing review was not saved", {
-        description: "Firebase could not update this billing record.",
+        description: "This billing record could not be updated.",
       });
     } finally {
       setIsSaving(false);

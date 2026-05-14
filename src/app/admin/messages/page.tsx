@@ -4,7 +4,6 @@ import * as React from "react";
 import {
   IconCalendar,
   IconCheck,
-  IconDatabaseImport,
   IconMailForward,
   IconMessageCircle,
   IconPhone,
@@ -394,51 +393,6 @@ export default function PatientMessagesPage() {
     }
   }
 
-  async function seedDemoConversations() {
-    if (conversationList.length > 0) {
-      toast.info("Conversations already exist in Firebase");
-      return;
-    }
-
-    setIsWriting(true);
-    try {
-      for (const seed of conversationSeeds) {
-        const { messages: seedMessages, seedKey, ...conversation } = seed;
-        const conversationRef = await addDoc(collection(db, "conversations"), {
-          ...conversation,
-          seedKey,
-          createdBy: auth.currentUser?.uid ?? null,
-          createdByEmail: auth.currentUser?.email ?? null,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-
-        for (const message of seedMessages) {
-          await addDoc(collection(db, "messages"), {
-            ...message,
-            conversationId: conversationRef.id,
-            senderId:
-              message.sender === "provider"
-                ? auth.currentUser?.uid ?? "demo-provider"
-                : conversation.patientId,
-            senderType: message.sender,
-            readAt: message.sender === "patient" ? null : serverTimestamp(),
-            createdAt: serverTimestamp(),
-          });
-        }
-      }
-
-      toast.success("Demo conversations added");
-    } catch (error) {
-      toast.error("Unable to seed conversations", {
-        description:
-          error instanceof Error ? error.message : "Please check Firestore rules.",
-      });
-    } finally {
-      setIsWriting(false);
-    }
-  }
-
   async function createNewConversation() {
     const selectedPatient = patients.find(
       (patient) => patient.id === newMessagePatientId,
@@ -509,14 +463,6 @@ export default function PatientMessagesPage() {
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <Button
-            variant="outline"
-            onClick={seedDemoConversations}
-            disabled={isWriting || conversationList.length > 0}
-          >
-            <IconDatabaseImport />
-            Seed demo
-          </Button>
           <Button onClick={() => setNewMessageOpen(true)}>
             <IconMailForward />
             New Message
@@ -531,7 +477,7 @@ export default function PatientMessagesPage() {
               <div>
                 <h3 className="font-semibold">Messages</h3>
                 <p className="text-muted-foreground text-sm">
-                  Live Firebase conversations
+                  Patient conversations
                 </p>
               </div>
               <Badge variant="outline">{conversationList.length}</Badge>
@@ -558,7 +504,7 @@ export default function PatientMessagesPage() {
               <div className="rounded-lg border border-dashed p-4 text-sm">
                 <p className="font-medium">No conversations found</p>
                 <p className="text-muted-foreground mt-1">
-                  Start a new message or seed demo conversations.
+                  Start a new message to begin a patient conversation.
                 </p>
               </div>
             ) : null}
@@ -787,8 +733,8 @@ export default function PatientMessagesPage() {
                 <IconMessageCircle className="text-muted-foreground mx-auto mb-3 size-8" />
                 <h3 className="font-semibold">No active conversation</h3>
                 <p className="text-muted-foreground mt-2 text-sm">
-                  Start a new message or seed demo conversations to open the
-                  patient communication workspace.
+                  Start a new message to open the patient communication
+                  workspace.
                 </p>
               </div>
             </div>
@@ -801,7 +747,7 @@ export default function PatientMessagesPage() {
           <DialogHeader>
             <DialogTitle>New patient message</DialogTitle>
             <DialogDescription>
-              Start a Firebase conversation connected to a patient profile.
+              Start a conversation connected to a patient profile.
             </DialogDescription>
           </DialogHeader>
 

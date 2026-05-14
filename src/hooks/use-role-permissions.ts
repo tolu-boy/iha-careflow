@@ -10,36 +10,66 @@ import {
   type RolePermissionConfig,
 } from "@/lib/permissions";
 
+let cachedRoles: RolePermissionConfig[] = defaultRoles;
+let cachedLoaded = false;
+let unsubscribeRoles: (() => void) | undefined;
+const listeners = new Set<
+  React.Dispatch<
+    React.SetStateAction<{
+      roles: RolePermissionConfig[];
+      isLoadingRoles: boolean;
+    }>
+  >
+>();
+
 export function useRolePermissions() {
-  const [roles, setRoles] =
-    React.useState<RolePermissionConfig[]>(defaultRoles);
-  const [isLoadingRoles, setIsLoadingRoles] = React.useState(true);
+  const [state, setState] = React.useState({
+    roles: cachedRoles,
+    isLoadingRoles: !cachedLoaded,
+  });
 
   React.useEffect(() => {
-    const unsubscribe = onSnapshot(
-      collection(db, "roles"),
-      (snapshot) => {
-        const nextRoles = snapshot.docs
-          .map((item) => toRoleConfig(item.id, item.data()))
-          .sort(
-            (first, second) =>
-              defaultRoles.findIndex((role) => role.key === first.key) -
-              defaultRoles.findIndex((role) => role.key === second.key),
-          );
+    listeners.add(setState);
 
-        setRoles(nextRoles.length > 0 ? nextRoles : defaultRoles);
-        setIsLoadingRoles(false);
-      },
-      () => {
-        setRoles(defaultRoles);
-        setIsLoadingRoles(false);
-      },
-    );
+    if (!unsubscribeRoles) {
+      unsubscribeRoles = onSnapshot(
+        collection(db, "roles"),
+        (snapshot) => {
+          const nextRoles = snapshot.docs
+            .map((item) => toRoleConfig(item.id, item.data()))
+            .sort(
+              (first, second) =>
+                defaultRoles.findIndex((role) => role.key === first.key) -
+                defaultRoles.findIndex((role) => role.key === second.key),
+            );
 
-    return unsubscribe;
+          cachedRoles = nextRoles.length > 0 ? nextRoles : defaultRoles;
+          cachedLoaded = true;
+          notifyListeners();
+        },
+        () => {
+          cachedRoles = defaultRoles;
+          cachedLoaded = true;
+          notifyListeners();
+        },
+      );
+    }
+
+    return () => {
+      listeners.delete(setState);
+    };
   }, []);
 
-  return { roles, isLoadingRoles };
+  return state;
+}
+
+function notifyListeners() {
+  for (const listener of listeners) {
+    listener({
+      roles: cachedRoles,
+      isLoadingRoles: !cachedLoaded,
+    });
+  }
 }
 
 function toRoleConfig(

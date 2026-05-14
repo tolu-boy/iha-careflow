@@ -7,7 +7,6 @@ import {
   IconCalendarPlus,
   IconChevronLeft,
   IconChevronRight,
-  IconDatabaseImport,
   IconFileText,
   IconMessageCircle,
   IconPlayerPlay,
@@ -134,84 +133,6 @@ const dateOptions: SelectOption[] = monthDays.map((day) => ({
   label: `${day.label}, May ${day.date}`,
 }));
 
-const demoAppointments: Omit<Appointment, "id">[] = [
-  {
-    patient: "John Doe",
-    provider: "Dr Smith",
-    day: "Wed",
-    date: 13,
-    time: "10:00 AM",
-    duration: "50 min",
-    type: "Therapy",
-    status: "Confirmed",
-    risk: "Medium",
-    reason: "Anxiety and sleep disruption",
-    billing: "Insurance verified",
-    notes: "SOAP draft ready",
-    message: "Sleep symptoms updated this morning.",
-  },
-  {
-    patient: "Sarah Kim",
-    provider: "Dr Lee",
-    day: "Thu",
-    date: 14,
-    time: "11:30 AM",
-    duration: "60 min",
-    type: "Intake",
-    status: "Pending",
-    risk: "Low",
-    reason: "Medication follow-up",
-    billing: "Insurance verification incomplete",
-    notes: "Not started",
-    message: "Asked to confirm appointment time.",
-  },
-  {
-    patient: "Mike Johnson",
-    provider: "Dr Smith",
-    day: "Thu",
-    date: 14,
-    time: "10:00 AM",
-    duration: "45 min",
-    type: "Lab review",
-    status: "Pending",
-    risk: "High",
-    reason: "Sleep disturbance and fatigue",
-    billing: "Insurance verified",
-    notes: "Template selected",
-    message: "Lab results uploaded.",
-  },
-  {
-    patient: "Avery Johnson",
-    provider: "Dr Ross",
-    day: "Fri",
-    date: 15,
-    time: "1:00 PM",
-    duration: "30 min",
-    type: "Follow-up",
-    status: "Confirmed",
-    risk: "Low",
-    reason: "Medication check",
-    billing: "Insurance verified",
-    notes: "Open note",
-    message: "No new messages.",
-  },
-  {
-    patient: "Morgan Lee",
-    provider: "Dr Lee",
-    day: "Fri",
-    date: 15,
-    time: "2:30 PM",
-    duration: "50 min",
-    type: "Therapy",
-    status: "Cancelled",
-    risk: "Medium",
-    reason: "Depressed mood",
-    billing: "Insurance verified",
-    notes: "Cancellation note needed",
-    message: "Cancelled through portal.",
-  },
-];
-
 const statusStyles: Record<AppointmentStatus, string> = {
   Pending: "border-amber-200 bg-amber-50 text-amber-700",
   Confirmed: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -244,7 +165,6 @@ export default function SchedulingPage() {
   const [patientNames, setPatientNames] = React.useState(demoPatientNames);
   const [activeAppointmentId, setActiveAppointmentId] = React.useState("");
   const [isLoading, setIsLoading] = React.useState(true);
-  const [isSeeding, setIsSeeding] = React.useState(false);
   const [viewMode, setViewMode] = React.useState<ViewMode>("Week");
   const [displayMode, setDisplayMode] = React.useState<DisplayMode>("Calendar");
   const [selectedDate, setSelectedDate] = React.useState(13);
@@ -288,7 +208,7 @@ export default function SchedulingPage() {
       () => {
         setIsLoading(false);
         toast.error("Unable to load appointments", {
-          description: "Check Firebase permissions for appointments.",
+          description: "Check appointment permissions and try again.",
         });
       },
     );
@@ -348,34 +268,6 @@ export default function SchedulingPage() {
     setNewForm((current) => ({ ...current, [field]: value }));
   }
 
-  async function seedDemoAppointments() {
-    setIsSeeding(true);
-
-    try {
-      await Promise.all(
-        demoAppointments.map((appointment) =>
-          addDoc(collection(db, "appointments"), {
-            ...appointment,
-            createdBy: auth.currentUser?.uid ?? null,
-            createdByEmail: auth.currentUser?.email ?? null,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          }),
-        ),
-      );
-
-      toast.success("Demo appointments added", {
-        description: "The scheduling calendar is now using Firestore data.",
-      });
-    } catch {
-      toast.error("Unable to add demo appointments", {
-        description: "Check Firebase permissions for appointments.",
-      });
-    } finally {
-      setIsSeeding(false);
-    }
-  }
-
   async function createAppointment() {
     const day = getDayFromDate(newForm.date);
 
@@ -418,7 +310,7 @@ export default function SchedulingPage() {
       });
     } catch {
       toast.error("Appointment was not created", {
-        description: "Firebase could not save this appointment.",
+        description: "This appointment could not be saved.",
       });
     }
   }
@@ -439,7 +331,7 @@ export default function SchedulingPage() {
       });
     } catch {
       toast.error("Appointment was not updated", {
-        description: "Firebase could not update this appointment.",
+        description: "This appointment could not be updated.",
       });
     }
   }
@@ -457,7 +349,7 @@ export default function SchedulingPage() {
       });
     } catch {
       toast.error("Reminder was not sent", {
-        description: "Firebase could not update this appointment.",
+        description: "This appointment could not be updated.",
       });
     }
   }
@@ -512,7 +404,7 @@ export default function SchedulingPage() {
       setSelectedDate(day.date);
     } catch {
       toast.error("Appointment was not rescheduled", {
-        description: "Firebase could not update this appointment.",
+        description: "This appointment could not be updated.",
       });
     }
   }
@@ -530,18 +422,6 @@ export default function SchedulingPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={seedDemoAppointments}
-            disabled={isSeeding || appointments.length > 0}
-          >
-            <IconDatabaseImport />
-            {appointments.length > 0
-              ? "Firebase connected"
-              : isSeeding
-                ? "Adding..."
-                : "Seed demo"}
-          </Button>
           <NewAppointmentDialog
             open={newDialogOpen}
             onOpenChange={setNewDialogOpen}
@@ -674,8 +554,8 @@ export default function SchedulingPage() {
             </h3>
             <p className="text-muted-foreground mt-2 text-sm">
               {isLoading
-                ? "Fetching schedule records from Firebase."
-                : "Create an appointment or seed demo records to start."}
+                ? "Loading schedule records."
+                : "Create an appointment to start."}
             </p>
           </aside>
         )}
@@ -861,7 +741,7 @@ function AppointmentTable({
                   className="text-muted-foreground h-24 text-center"
                 >
                   {isLoading
-                    ? "Loading appointments from Firebase..."
+                    ? "Loading appointments..."
                     : "No appointments match this view."}
                 </TableCell>
               </TableRow>
