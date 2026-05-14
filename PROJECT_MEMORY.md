@@ -248,6 +248,22 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
   - Weekly grid is constrained to show all seven day columns in the center panel.
   - Month mode switches to the table view so appointments outside the visible week are still visible.
 
+- `/admin/settings`
+  - File: `src/app/admin/settings/page.tsx`
+  - Care Settings / Roles & Permissions.
+  - Sidebar `Care Settings` now routes to `/admin/settings`.
+  - Reads/writes role definitions from Firestore collection `roles`.
+  - Reads and updates staff records from Firestore collection `users`.
+  - UI includes:
+    - Role list for Super Admin, Admin, Doctor, Billing, Front Desk, and Clinical Assistant.
+    - Role access panel with one clear access dropdown per care module.
+    - Permission levels: No Access, View, Manage.
+    - Protected data badges integrated directly into sensitive module rows.
+    - Staff panel with role assignment and account enabled/suspended toggle.
+  - `Save changes` persists role permissions to `roles/{roleKey}`.
+  - Staff role/status changes update `users/{uid}`.
+  - Users without Manage access for Settings can view settings but cannot edit.
+
 ## Shared Components / Important Files
 
 - `src/components/auth-panel.tsx`
@@ -295,6 +311,7 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
     - Clinical Notes: `/admin/clinical-notes`
     - Patient Messages: `/admin/messages`
     - Scheduling: `/admin/scheduling`
+    - Care Settings: `/admin/settings`
 
 - `src/components/nav-care-directory.tsx`
   - Sidebar group labeled `Care Directory`.
@@ -337,7 +354,15 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
   - `firestore.rules`
 - Firebase rules have not been deployed yet unless a Firebase CLI deploy succeeds in the current session.
 - The previous rule `allow read, write: if false;` blocks every Firestore read/write and causes registration profile saves and onboarding saves to fail with `permission-denied`.
-- The local `firestore.rules` file allows authenticated staff users to read/create/update app workflow collections, lets a user read/update their own `users/{uid}` profile, and denies deletes by default.
+- The local `firestore.rules` file now enforces dynamic role-based collection access using `users/{uid}.role`, `users/{uid}.active`, and the saved `roles/{roleKey}.permissions` document.
+- Rules interpret permission levels as:
+  - `none`: no read/write access.
+  - `view`: read access only.
+  - `manage`: create/update access plus read access.
+- Example: if Care Settings changes Doctor -> Patients to `Manage`, Firestore rules allow doctors to create/update `patients` after the role document is saved.
+- `super_admin` always keeps settings management access, and `admin`/`super_admin` can bootstrap role documents when no role document exists for their current role.
+- Supported role keys are `super_admin`, `admin`, `doctor`, `billing`, `front_desk`, and `clinical_assistant`; legacy `provider` is normalized to doctor in the app.
+- Deletes remain denied by default.
 - These rules still need to be pasted into Firebase Console or deployed with `firebase deploy --only firestore:rules` before the live Firebase project will use them.
 
 ## Firestore Collections
@@ -345,8 +370,16 @@ The app was adapted from a shadcn-style admin dashboard reference, but Convex an
 Firestore persistence has started with auth profiles and onboarding patient records. Recommended collection design for the backend phase:
 
 - `users`
-  - Admin/staff/provider profiles.
-  - Fields: `uid`, `userId`, `fullName`, `displayName`, `email`, `role`, `providerId`, `active`, `createdAt`, `updatedAt`.
+  - Admin/staff/doctor profiles.
+  - Read/written by auth and `/admin/settings`.
+  - Fields: `uid`, `userId`, `fullName`, `displayName`, `email`, `role`, `active`, `status`, `lastActive`, `createdAt`, `updatedAt`.
+
+- `roles`
+  - Role definitions and permission bundles.
+  - Read/written by `/admin/settings`.
+  - Document ids are role keys such as `admin`, `doctor`, `billing`, `front_desk`.
+  - Fields include `key`, `label`, `description`, `permissions`, `updatedBy`, and `updatedAt`.
+  - Permission levels are `none`, `view`, and `manage`.
 
 - `patients`
   - Core patient profile.
@@ -392,9 +425,24 @@ Firestore persistence has started with auth profiles and onboarding patient reco
   - Important for healthcare admin actions.
   - Fields: `actorId`, `action`, `resourceType`, `resourceId`, `metadata`, `createdAt`.
 
-## RBAC Roles
+## Roles & Permissions
 
-RBAC is not implemented yet. Recommended roles:
+Role enforcement is implemented in the frontend shell and dynamic local Firestore rules:
+
+- `src/lib/permissions.ts`
+  - Shared role keys, permission keys, default role permissions, route-permission map, and helpers.
+- `src/hooks/use-role-permissions.ts`
+  - Loads `roles` from Firestore and falls back to default roles if none exist or rules block access.
+- `src/app/admin/layout.tsx`
+  - Blocks protected admin routes when the authenticated user's role lacks the required permission.
+- `src/components/app-sidebar.tsx`
+  - Filters sidebar links based on the authenticated user's role.
+- `src/components/firebase-provider.tsx`
+  - Listens to `users/{uid}` in realtime so role/status changes update the current session.
+- `firestore.rules`
+  - Reads `roles/{roleKey}.permissions` dynamically so the Settings page controls backend read/write access after rules are pasted/deployed.
+
+Current roles:
 
 - `super_admin`
   - Full system access, user management, settings, audit logs.
@@ -402,7 +450,7 @@ RBAC is not implemented yet. Recommended roles:
 - `admin`
   - Manage operations workflows, onboarding, scheduling, billing, messages.
 
-- `provider`
+- `doctor`
   - Access assigned patient schedule, clinical notes, messages, sign notes.
 
 - `billing`
@@ -417,13 +465,14 @@ RBAC is not implemented yet. Recommended roles:
 Suggested route permissions:
 
 - `/admin/dashboard`: all staff roles.
-- `/admin/onboarding`: admin, front_desk, clinical_assistant, provider read access.
-- `/admin/patients`: admin, front_desk, clinical_assistant, provider read/assigned patient access.
-- `/admin/doctors`: super_admin/admin full access, front_desk scheduling read access, providers own profile read access.
-- `/admin/billing`: admin, billing, limited provider read access.
-- `/admin/clinical-notes`: provider, clinical_assistant draft access, admin read access.
-- `/admin/messages`: admin, provider, clinical_assistant, front_desk.
-- `/admin/scheduling`: admin, front_desk, provider read/limited update.
+- `/admin/onboarding`: controlled by `onboarding` permission.
+- `/admin/patients`: controlled by `patients` permission.
+- `/admin/doctors`: controlled by `doctors` permission.
+- `/admin/billing`: controlled by `billing` permission.
+- `/admin/clinical-notes`: controlled by `notes` permission.
+- `/admin/messages`: controlled by `messages` permission.
+- `/admin/scheduling`: controlled by `scheduling` permission.
+- `/admin/settings`: controlled by `settings` permission.
 
 ## Workflow Connections
 
@@ -530,6 +579,20 @@ Cross-page relationships already represented in UI:
   - reminder automation banner
   - appointment detail panel
   - confirm/cancel/reminder/reschedule persistence
+- Care Settings / Roles & Permissions UI:
+  - `/admin/settings` route
+  - Firestore live data from `roles`
+  - Firestore live data from `users`
+  - role cards
+  - module access dropdowns
+  - staff role assignment UI
+  - account enabled/suspended UI
+  - protected-data indicators on sensitive modules
+- Role/permission enforcement:
+  - sidebar link filtering
+  - admin route guard
+  - realtime current-user profile updates
+  - dynamic local Firestore rules updated for role-based backend access
 - `pnpm lint` and `pnpm build` have passed after latest feature work.
 
 ## Pending TODOs
@@ -541,7 +604,7 @@ Cross-page relationships already represented in UI:
 - Firebase Auth login/register/logout is implemented.
 - `/admin/*` routes are protected by the admin layout.
 - Deploy Firestore rules to Firebase Console/project.
-- Implement RBAC in frontend route guards and Firestore rules.
+- Paste/deploy the updated dynamic role-based Firestore rules before relying on backend protection.
 - Add audit logging for clinical/billing/scheduling actions.
 
 ### Data Layer
@@ -579,7 +642,7 @@ Cross-page relationships already represented in UI:
   - Required fields by note type.
   - Version history.
   - Print/export note.
-  - Provider-only signing/RBAC enforcement.
+  - Provider-only signing/role enforcement.
 
 - Messages:
   - Read/unread transitions beyond manual status.

@@ -2,6 +2,7 @@ import type { User } from "firebase/auth";
 import type { DocumentData } from "firebase/firestore";
 
 import type { AuthUser } from "@/stores/auth-store";
+import { normalizeRole } from "@/lib/permissions";
 
 export function buildAuthUser(
   firebaseUser: User,
@@ -23,7 +24,7 @@ export function buildAuthUser(
     fullName,
     displayName: getString(profile?.displayName) || fullName,
     photoURL: firebaseUser.photoURL ?? getString(profile?.photoURL),
-    role: getString(profile?.role) || "admin",
+    role: normalizeRole(getString(profile?.role) || "admin"),
     active: typeof profile?.active === "boolean" ? profile.active : true,
   };
 }
