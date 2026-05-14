@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
 
 import { buildAuthUser } from "@/lib/auth-profile";
 import { auth, db } from "@/lib/firebase";
@@ -12,7 +12,11 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
   const setUser = useAuthStore((state) => state.setUser);
 
   React.useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    let unsubscribeUserProfile: (() => void) | undefined;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      unsubscribeUserProfile?.();
+
       if (!firebaseUser) {
         setUser(null);
         return;
@@ -20,39 +24,44 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
 
       const userRef = doc(db, "users", firebaseUser.uid);
 
-      try {
-        const userSnapshot = await getDoc(userRef);
+      unsubscribeUserProfile = onSnapshot(
+        userRef,
+        async (userSnapshot) => {
+          if (userSnapshot.exists()) {
+            setUser(buildAuthUser(firebaseUser, userSnapshot.data()));
+            return;
+          }
 
-        if (userSnapshot.exists()) {
-          setUser(buildAuthUser(firebaseUser, userSnapshot.data()));
-          return;
-        }
+          const fallbackUser = buildAuthUser(firebaseUser);
 
-        const fallbackUser = buildAuthUser(firebaseUser);
+          await setDoc(
+            userRef,
+            {
+              uid: fallbackUser.uid,
+              userId: fallbackUser.userId,
+              fullName: fallbackUser.fullName,
+              displayName: fallbackUser.displayName,
+              email: fallbackUser.email,
+              role: fallbackUser.role,
+              active: fallbackUser.active,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true },
+          );
 
-        await setDoc(
-          userRef,
-          {
-            uid: fallbackUser.uid,
-            userId: fallbackUser.userId,
-            fullName: fallbackUser.fullName,
-            displayName: fallbackUser.displayName,
-            email: fallbackUser.email,
-            role: fallbackUser.role,
-            active: fallbackUser.active,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true },
-        );
-
-        setUser(fallbackUser);
-      } catch {
-        setUser(buildAuthUser(firebaseUser));
-      }
+          setUser(fallbackUser);
+        },
+        () => {
+          setUser(buildAuthUser(firebaseUser));
+        },
+      );
     });
 
-    return unsubscribe;
+    return () => {
+      unsubscribeUserProfile?.();
+      unsubscribeAuth();
+    };
   }, [setUser]);
 
   return <>{children}</>;

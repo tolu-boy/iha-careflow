@@ -6,59 +6,152 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function userPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function userProfile() {
+      return get(userPath());
+    }
+
+    function activeStaff() {
+      return signedIn()
+        && exists(userPath())
+        && userProfile().data.active == true;
+    }
+
+    function role() {
+      return userProfile().data.role == "provider"
+        ? "doctor"
+        : userProfile().data.role;
+    }
+
+    function hasRole(roles) {
+      return activeStaff() && role() in roles;
+    }
+
+    function rolePath() {
+      return /databases/$(database)/documents/roles/$(role());
+    }
+
+    function roleExists() {
+      return activeStaff() && exists(rolePath());
+    }
+
+    function permissionLevel(permission) {
+      return roleExists()
+        ? get(rolePath()).data.permissions[permission]
+        : "none";
+    }
+
+    function canView(permission) {
+      return activeStaff()
+        && (
+          permissionLevel(permission) == "view"
+          || permissionLevel(permission) == "manage"
+        );
+    }
+
+    function canManage(permission) {
+      return activeStaff() && permissionLevel(permission) == "manage";
+    }
+
     function ownsUserDoc(userId) {
       return signedIn() && request.auth.uid == userId;
+    }
+
+    function canBootstrapSettings() {
+      return hasRole(["super_admin", "admin"]) && !exists(rolePath());
+    }
+
+    function canReadSettings() {
+      return hasRole(["super_admin"])
+        || canView("settings")
+        || canBootstrapSettings();
+    }
+
+    function canManageSettings() {
+      return hasRole(["super_admin"])
+        || canManage("settings")
+        || canBootstrapSettings();
     }
 
     match /users/{userId} {
       allow create: if ownsUserDoc(userId)
         && request.resource.data.uid == request.auth.uid;
-      allow read, update: if ownsUserDoc(userId);
+      allow read: if ownsUserDoc(userId) || canReadSettings();
+      allow update: if canManageSettings()
+        || (
+          ownsUserDoc(userId)
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.active == resource.data.active
+        );
+      allow delete: if false;
+    }
+
+    match /roles/{roleId} {
+      allow read: if activeStaff();
+      allow create, update: if canManageSettings();
+      allow delete: if false;
+    }
+
+    match /patientIntakes/{intakeId} {
+      allow read: if canView("onboarding");
+      allow create, update: if canManage("onboarding");
       allow delete: if false;
     }
 
     match /patients/{patientId} {
-      allow read, create, update: if signedIn();
+      allow read: if canView("patients");
+      allow create, update: if canManage("patients");
       allow delete: if false;
     }
 
     match /doctors/{doctorId} {
-      allow read, create, update: if signedIn();
+      allow read: if canView("doctors");
+      allow create, update: if canManage("doctors");
       allow delete: if false;
     }
 
     match /insuranceRecords/{recordId} {
-      allow read, create, update: if signedIn();
+      allow read: if canView("billing");
+      allow create, update: if canManage("billing");
       allow delete: if false;
     }
 
     match /billingRecords/{recordId} {
-      allow read, create, update: if signedIn();
+      allow read: if canView("billing");
+      allow create, update: if canManage("billing");
       allow delete: if false;
     }
 
     match /appointments/{appointmentId} {
-      allow read, create, update: if signedIn();
+      allow read: if canView("scheduling");
+      allow create, update: if canManage("scheduling");
       allow delete: if false;
     }
 
     match /clinicalNotes/{noteId} {
-      allow read, create, update: if signedIn();
+      allow read: if canView("notes");
+      allow create, update: if canManage("notes");
       allow delete: if false;
     }
 
     match /conversations/{conversationId} {
-      allow read, create, update: if signedIn();
+      allow read: if canView("messages");
+      allow create, update: if canManage("messages");
       allow delete: if false;
     }
 
     match /messages/{messageId} {
-      allow read, create, update: if signedIn();
+      allow read: if canView("messages");
+      allow create, update: if canManage("messages");
       allow delete: if false;
     }
 
     match /auditLogs/{auditLogId} {
-      allow read, create: if signedIn();
+      allow read: if canView("audit");
+      allow create: if activeStaff();
       allow update, delete: if false;
     }
 
