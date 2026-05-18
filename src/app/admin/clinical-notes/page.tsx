@@ -10,12 +10,11 @@ import {
   IconSignature,
 } from "@tabler/icons-react";
 import {
-  addDoc,
   collection,
   doc,
   onSnapshot,
   serverTimestamp,
-  updateDoc,
+  writeBatch,
 } from "firebase/firestore";
 import { toast } from "sonner";
 
@@ -59,6 +58,8 @@ type Patient = {
     label: string;
     time: string;
     provider: string;
+    date: string;
+    dateKey: string;
   }[];
 };
 
@@ -84,82 +85,22 @@ type ClinicalNote = {
   plan: string;
 };
 
+type ScheduledAppointment = {
+  id: string;
+  patientId: string;
+  patientName: string;
+  doctorId: string;
+  doctorName: string;
+  dateKey: string;
+  time: string;
+  type: string;
+  status: string;
+};
+
 type SoapDraft = Pick<
   ClinicalNote,
   "subjective" | "objective" | "assessment" | "plan"
 >;
-
-const demoPatients: Patient[] = [
-  {
-    id: "john-doe",
-    name: "John Doe",
-    age: 34,
-    reason: "Anxiety",
-    risk: "Medium",
-    insurance: "Aetna",
-    memberId: "AET-47291",
-    appointments: [
-      {
-        id: "john-may-13",
-        label: "May 13 - Therapy Session",
-        time: "10:00 AM",
-        provider: "Dr Smith",
-      },
-      {
-        id: "john-may-10",
-        label: "May 10 - Follow-up",
-        time: "2:30 PM",
-        provider: "Dr Smith",
-      },
-    ],
-  },
-  {
-    id: "sarah-kim",
-    name: "Sarah Kim",
-    age: 29,
-    reason: "Medication follow-up",
-    risk: "Low",
-    insurance: "BlueCross BlueShield",
-    memberId: "BCBS-88421",
-    appointments: [
-      {
-        id: "sarah-may-13",
-        label: "May 13 - Medication Review",
-        time: "11:30 AM",
-        provider: "Dr Chen",
-      },
-      {
-        id: "sarah-may-07",
-        label: "May 7 - Follow-up",
-        time: "9:15 AM",
-        provider: "Dr Chen",
-      },
-    ],
-  },
-  {
-    id: "mike-johnson",
-    name: "Mike Johnson",
-    age: 42,
-    reason: "Sleep disturbance",
-    risk: "High",
-    insurance: "Cigna",
-    memberId: "CIG-11820",
-    appointments: [
-      {
-        id: "mike-may-14",
-        label: "May 14 - Intake Note",
-        time: "1:00 PM",
-        provider: "Dr Ross",
-      },
-      {
-        id: "mike-may-11",
-        label: "May 11 - Lab Review",
-        time: "4:00 PM",
-        provider: "Dr Ross",
-      },
-    ],
-  },
-];
 
 const noteTypes: Array<NoteType | "All"> = [
   "All",
@@ -201,8 +142,12 @@ const soapFields: Array<{
 
 export default function ClinicalNotesPage() {
   const activeNoteIdRef = React.useRef("");
+  const queryAppointmentHandledRef = React.useRef(false);
   const [notes, setNotes] = React.useState<ClinicalNote[]>([]);
-  const [patients, setPatients] = React.useState<Patient[]>(demoPatients);
+  const [patients, setPatients] = React.useState<Patient[]>([]);
+  const [appointments, setAppointments] = React.useState<ScheduledAppointment[]>(
+    [],
+  );
   const [activeNoteId, setActiveNoteId] = React.useState("");
   const [drafts, setDrafts] = React.useState<Record<string, Partial<SoapDraft>>>(
     {},
@@ -213,10 +158,8 @@ export default function ClinicalNotesPage() {
   const [filter, setFilter] = React.useState<(typeof noteTypes)[number]>("All");
   const [modalOpen, setModalOpen] = React.useState(false);
   const [patientSearch, setPatientSearch] = React.useState("");
-  const [newPatientId, setNewPatientId] = React.useState(demoPatients[0].id);
-  const [newAppointmentId, setNewAppointmentId] = React.useState(
-    demoPatients[0].appointments[0].id,
-  );
+  const [newPatientId, setNewPatientId] = React.useState("");
+  const [newAppointmentId, setNewAppointmentId] = React.useState("");
   const [newNoteType, setNewNoteType] = React.useState<NoteType>("SOAP");
 
   React.useEffect(() => {
@@ -262,30 +205,103 @@ export default function ClinicalNotesPage() {
           toPatient(snapshotDoc.id, snapshotDoc.data()),
         );
 
-        if (firebasePatients.length > 0) {
-          const nextPatients = [...firebasePatients, ...demoPatients];
-          setPatients(nextPatients);
-
-          if (!nextPatients.some((patient) => patient.id === newPatientId)) {
-            setNewPatientId(nextPatients[0].id);
-            setNewAppointmentId(nextPatients[0].appointments[0].id);
-          }
-        }
+        setPatients(firebasePatients);
+        setNewPatientId((current) =>
+          firebasePatients.some((patient) => patient.id === current)
+            ? current
+            : firebasePatients[0]?.id ?? "",
+        );
       },
     );
 
     return unsubscribe;
-  }, [newPatientId]);
+  }, []);
+
+  React.useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "appointments"), (snapshot) => {
+      const nextAppointments = snapshot.docs
+        .map((snapshotDoc) =>
+          toScheduledAppointment(snapshotDoc.id, snapshotDoc.data()),
+        )
+        .sort((first, second) => {
+          const dateDelta = first.dateKey.localeCompare(second.dateKey);
+          return dateDelta || first.time.localeCompare(second.time);
+        });
+
+      setAppointments(nextAppointments);
+    });
+
+    return unsubscribe;
+  }, []);
 
   const activeNote =
     notes.find((note) => note.id === activeNoteId) ?? notes[0] ?? null;
-  const activePatient = activeNote ? patientFromNote(activeNote) : patients[0];
+  const patientsWithAppointments = React.useMemo(
+    () =>
+      patients.map((patient) => ({
+        ...patient,
+        appointments: getPatientAppointments(patient, appointments),
+      })),
+    [appointments, patients],
+  );
+  const activePatient = activeNote
+    ? patientFromNote(activeNote)
+    : patientsWithAppointments[0];
   const activeDraft = activeNote ? drafts[activeNote.id] ?? {} : {};
   const newPatient =
-    patients.find((patient) => patient.id === newPatientId) ?? patients[0];
-  const filteredPatients = patients.filter((patient) =>
+    patientsWithAppointments.find((patient) => patient.id === newPatientId) ??
+    patientsWithAppointments[0];
+  const filteredPatients = patientsWithAppointments.filter((patient) =>
     patient.name.toLowerCase().includes(patientSearch.trim().toLowerCase()),
   );
+  const appointmentReady = Boolean(newPatient?.appointments.length);
+  const selectedAppointmentId = newPatient?.appointments.some(
+    (appointment) => appointment.id === newAppointmentId,
+  )
+    ? newAppointmentId
+    : newPatient?.appointments[0]?.id ?? "";
+
+  React.useEffect(() => {
+    if (queryAppointmentHandledRef.current || typeof window === "undefined") {
+      return;
+    }
+
+    const appointmentId = new URLSearchParams(window.location.search).get(
+      "appointmentId",
+    );
+
+    if (!appointmentId || appointments.length === 0) {
+      return;
+    }
+
+    const existingNote = notes.find(
+      (note) => note.appointmentId === appointmentId,
+    );
+
+    if (existingNote) {
+      window.setTimeout(() => setActiveNoteId(existingNote.id), 0);
+      queryAppointmentHandledRef.current = true;
+      return;
+    }
+
+    const appointment = appointments.find((item) => item.id === appointmentId);
+    const patient = patientsWithAppointments.find(
+      (item) =>
+        item.id === appointment?.patientId ||
+        item.appointments.some((patientAppointment) => patientAppointment.id === appointmentId),
+    );
+
+    if (!appointment || !patient) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      setNewPatientId(patient.id);
+      setNewAppointmentId(appointment.id);
+      setModalOpen(true);
+    }, 0);
+    queryAppointmentHandledRef.current = true;
+  }, [appointments, notes, patientsWithAppointments]);
 
   const filteredNotes = notes.filter((note) => {
     const query = search.trim().toLowerCase();
@@ -321,20 +337,49 @@ export default function ClinicalNotesPage() {
   }
 
   function handleNewPatientChange(patientId: string) {
-    const patient = patients.find((item) => item.id === patientId) ?? patients[0];
+    const patient =
+      patientsWithAppointments.find((item) => item.id === patientId) ??
+      patientsWithAppointments[0];
+
+    if (!patient) {
+      setNewPatientId("");
+      setNewAppointmentId("");
+      return;
+    }
+
     setNewPatientId(patient.id);
-    setNewAppointmentId(patient.appointments[0].id);
+    setNewAppointmentId(patient.appointments[0]?.id ?? "");
   }
 
   async function createNote() {
     const patient =
-      patients.find((item) => item.id === newPatientId) ?? patients[0];
+      patientsWithAppointments.find((item) => item.id === newPatientId) ??
+      patientsWithAppointments[0];
+
+    if (!patient) {
+      toast.error("Select a patient", {
+        description: "Create or select a patient before opening a clinical note.",
+      });
+      return;
+    }
+
     const appointment =
-      patient.appointments.find((item) => item.id === newAppointmentId) ??
+      patient.appointments.find((item) => item.id === selectedAppointmentId) ??
       patient.appointments[0];
 
+    if (!appointment) {
+      toast.error("Select a scheduled appointment", {
+        description:
+          "Create an appointment in Scheduling before opening a clinical note.",
+      });
+      return;
+    }
+
     try {
-      const createdNote = await addDoc(collection(db, "clinicalNotes"), {
+      const noteRef = doc(collection(db, "clinicalNotes"));
+      const batch = writeBatch(db);
+
+      batch.set(noteRef, {
         patientId: patient.id,
         patientName: patient.name,
         patientAge: patient.age,
@@ -347,7 +392,7 @@ export default function ClinicalNotesPage() {
         appointmentLabel: appointment.label,
         appointmentTime: appointment.time,
         provider: appointment.provider,
-        date: appointment.label.split(" - ")[0],
+        date: appointment.date,
         status: "Draft",
         subjective: "",
         objective: "",
@@ -359,7 +404,16 @@ export default function ClinicalNotesPage() {
         updatedAt: serverTimestamp(),
       });
 
-      setActiveNoteId(createdNote.id);
+      batch.update(doc(db, "appointments", appointment.id), {
+        noteId: noteRef.id,
+        noteStatus: "Draft",
+        notes: "Draft note started",
+        updatedAt: serverTimestamp(),
+      });
+
+      await batch.commit();
+
+      setActiveNoteId(noteRef.id);
       setModalOpen(false);
       toast.success("Clinical note created", {
         description: `${patient.name}'s ${newNoteType} is ready to edit.`,
@@ -379,7 +433,9 @@ export default function ClinicalNotesPage() {
     setIsSaving(true);
 
     try {
-      await updateDoc(doc(db, "clinicalNotes", activeNote.id), {
+      const batch = writeBatch(db);
+
+      batch.update(doc(db, "clinicalNotes", activeNote.id), {
         subjective: getNoteValue("subjective"),
         objective: getNoteValue("objective"),
         assessment: getNoteValue("assessment"),
@@ -388,6 +444,20 @@ export default function ClinicalNotesPage() {
         signedAt: nextStatus === "Signed" ? serverTimestamp() : null,
         updatedAt: serverTimestamp(),
       });
+
+      if (activeNote.appointmentId) {
+        batch.update(doc(db, "appointments", activeNote.appointmentId), {
+          noteId: activeNote.id,
+          noteStatus: nextStatus ?? activeNote.status,
+          notes:
+            nextStatus === "Signed"
+              ? "Clinical note signed"
+              : "Clinical note updated",
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      await batch.commit();
 
       setDrafts((current) => {
         const next = { ...current };
@@ -428,8 +498,9 @@ export default function ClinicalNotesPage() {
             patients={filteredPatients}
             selectedPatient={newPatient}
             selectedPatientId={newPatientId}
-            selectedAppointmentId={newAppointmentId}
+            selectedAppointmentId={selectedAppointmentId}
             selectedNoteType={newNoteType}
+            appointmentReady={appointmentReady}
             onPatientChange={handleNewPatientChange}
             onAppointmentChange={setNewAppointmentId}
             onNoteTypeChange={setNewNoteType}
@@ -654,6 +725,7 @@ function NewNoteDialog({
   selectedPatientId,
   selectedAppointmentId,
   selectedNoteType,
+  appointmentReady,
   onPatientChange,
   onAppointmentChange,
   onNoteTypeChange,
@@ -664,10 +736,11 @@ function NewNoteDialog({
   patientSearch: string;
   onPatientSearchChange: (value: string) => void;
   patients: Patient[];
-  selectedPatient: Patient;
+  selectedPatient: Patient | undefined;
   selectedPatientId: string;
   selectedAppointmentId: string;
   selectedNoteType: NoteType;
+  appointmentReady: boolean;
   onPatientChange: (value: string) => void;
   onAppointmentChange: (value: string) => void;
   onNoteTypeChange: (value: NoteType) => void;
@@ -704,11 +777,17 @@ function NewNoteDialog({
                 <SelectValue placeholder="Select patient" />
               </SelectTrigger>
               <SelectContent>
-                {patients.map((patient) => (
-                  <SelectItem key={patient.id} value={patient.id}>
-                    {patient.name}
+                {patients.length > 0 ? (
+                  patients.map((patient) => (
+                    <SelectItem key={patient.id} value={patient.id}>
+                      {patient.name}
+                    </SelectItem>
+                  ))
+                ) : (
+                  <SelectItem value="no-patients" disabled>
+                    No patients found
                   </SelectItem>
-                ))}
+                )}
               </SelectContent>
             </Select>
           </div>
@@ -723,13 +802,24 @@ function NewNoteDialog({
                 <SelectValue placeholder="Select appointment" />
               </SelectTrigger>
               <SelectContent>
-                {selectedPatient.appointments.map((appointment) => (
-                  <SelectItem key={appointment.id} value={appointment.id}>
-                    {appointment.label}
+                {selectedPatient?.appointments.length ? (
+                  selectedPatient.appointments.map((appointment) => (
+                    <SelectItem key={appointment.id} value={appointment.id}>
+                      {appointment.label}
+                    </SelectItem>
+                  ))
+                ) : (
+                  <SelectItem value="no-appointments" disabled>
+                    No scheduled appointments
                   </SelectItem>
-                ))}
+                )}
               </SelectContent>
             </Select>
+            {!appointmentReady ? (
+              <p className="text-muted-foreground text-xs">
+                Schedule an appointment first, then create the note from here.
+              </p>
+            ) : null}
           </div>
 
           <div className="grid gap-2">
@@ -758,7 +848,9 @@ function NewNoteDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={onCreate}>Create note</Button>
+          <Button onClick={onCreate} disabled={!appointmentReady}>
+            Create note
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -823,27 +915,70 @@ function toClinicalNote(
 }
 
 function toPatient(id: string, data: Record<string, unknown>): Patient {
-  const name = getString(data.fullName, getString(data.patientName, "Unnamed patient"));
-  const reason = getString(data.reasonForVisit, "New patient intake");
-  const appointmentId = `${id}-intake`;
+  const name =
+    getString(data.fullName, "") ||
+    getString(data.name, "") ||
+    getString(data.patientName, "Unnamed patient");
+  const reason =
+    getString(data.reasonForVisit, "") ||
+    getString(data.reason, "New patient intake");
 
   return {
     id,
     name,
     age: getAge(getString(data.dateOfBirth)),
     reason,
-    risk: getRisk(data.riskLevel),
-    insurance: getString(data.insuranceProvider, "Not provided"),
+    risk: getRisk(data.risk ?? data.riskLevel),
+    insurance:
+      getString(data.insuranceProvider, "") ||
+      getString(data.insurancePlan, "Not provided"),
     memberId: getString(data.memberId, "Missing"),
-    appointments: [
-      {
-        id: appointmentId,
-        label: "New intake appointment",
-        time: "Not scheduled",
-        provider: "Unassigned",
-      },
-    ],
+    appointments: [],
   };
+}
+
+function toScheduledAppointment(
+  id: string,
+  data: Record<string, unknown>,
+): ScheduledAppointment {
+  const dateKey = getAppointmentDateKey(data);
+  const patientName =
+    getString(data.patientName, "") ||
+    getString(data.patient, "Unnamed patient");
+  const doctorName =
+    getString(data.doctorName, "") || getString(data.provider, "Unassigned");
+
+  return {
+    id,
+    patientId: getString(data.patientId, ""),
+    patientName,
+    doctorId: getString(data.doctorId, ""),
+    doctorName,
+    dateKey,
+    time: getString(data.time, "Not scheduled"),
+    type: getString(data.type, "Appointment"),
+    status: getString(data.status, "Pending"),
+  };
+}
+
+function getPatientAppointments(
+  patient: Patient,
+  appointments: ScheduledAppointment[],
+) {
+  return appointments
+    .filter(
+      (appointment) =>
+        appointment.patientId === patient.id ||
+        (!appointment.patientId && appointment.patientName === patient.name),
+    )
+    .map((appointment) => ({
+      id: appointment.id,
+      label: `${formatShortDate(appointment.dateKey)} - ${appointment.type} - ${appointment.doctorName}`,
+      time: appointment.time,
+      provider: appointment.doctorName,
+      date: formatShortDate(appointment.dateKey),
+      dateKey: appointment.dateKey,
+    }));
 }
 
 function patientFromNote(note: ClinicalNote): Patient {
@@ -861,9 +996,39 @@ function patientFromNote(note: ClinicalNote): Patient {
         label: note.appointmentLabel,
         time: note.appointmentTime,
         provider: note.provider,
+        date: note.date,
+        dateKey: "",
       },
     ],
   };
+}
+
+function getAppointmentDateKey(data: Record<string, unknown>) {
+  const storedDateKey = getString(data.dateKey);
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(storedDateKey)) {
+    return storedDateKey;
+  }
+
+  const year = getNumberWithFallback(data.year, 2026);
+  const month = getNumberWithFallback(data.month, 5);
+  const date = getNumberWithFallback(data.date, 13);
+
+  return `${year}-${padDatePart(month)}-${padDatePart(date)}`;
+}
+
+function padDatePart(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function formatShortDate(dateKey: string) {
+  const [year, month, day] = dateKey.split("-");
+
+  if (!year || !month || !day) {
+    return "Scheduled visit";
+  }
+
+  return `${month}/${day}/${year}`;
 }
 
 function getString(value: unknown, fallback = "") {
@@ -872,6 +1037,10 @@ function getString(value: unknown, fallback = "") {
 
 function getNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function getNumberWithFallback(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 function getAge(dateOfBirth: string) {
