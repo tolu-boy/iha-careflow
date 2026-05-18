@@ -26,7 +26,9 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { useRolePermissions } from "@/hooks/use-role-permissions";
 import { auth } from "@/lib/firebase";
+import { getRoleLabel } from "@/lib/permissions";
 import { useAuthStore } from "@/stores/auth-store";
 
 export function NavUser({
@@ -42,10 +44,12 @@ export function NavUser({
   const router = useRouter();
   const authUser = useAuthStore((state) => state.user);
   const resetUser = useAuthStore((state) => state.resetUser);
+  const { roles } = useRolePermissions();
   const currentUser = {
     name: authUser?.fullName || authUser?.displayName || user.name,
     email: authUser?.email || user.email,
     avatar: authUser?.photoURL || user.avatar,
+    role: getRoleLabel(authUser?.role, roles),
   };
 
   async function handleLogout() {
@@ -74,7 +78,7 @@ export function NavUser({
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">{currentUser.name}</span>
                 <span className="text-muted-foreground truncate text-xs">
-                  {currentUser.email}
+                  {currentUser.role}
                 </span>
               </div>
               <IconDotsVertical className="ml-auto size-4" />
@@ -100,6 +104,9 @@ export function NavUser({
                   <span className="truncate font-medium">{currentUser.name}</span>
                   <span className="text-muted-foreground truncate text-xs">
                     {currentUser.email}
+                  </span>
+                  <span className="text-muted-foreground truncate text-xs">
+                    Role: {currentUser.role}
                   </span>
                 </div>
               </div>
