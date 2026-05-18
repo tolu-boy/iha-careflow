@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import * as React from "react";
 import {
   IconBellRinging,
@@ -75,6 +76,8 @@ type Appointment = {
   reason: string;
   billing: string;
   notes: string;
+  noteId?: string;
+  noteStatus?: string;
   message: string;
   reminderSentAt?: string;
 };
@@ -1240,6 +1243,10 @@ function AppointmentDetailPanel({
         <DetailRow label="Duration" value={appointment.duration} />
         <DetailRow label="Appointment type" value={appointment.type} />
         <DetailRow label="Doctor" value={appointment.provider} />
+        <DetailRow
+          label="Clinical note"
+          value={appointment.noteStatus ?? appointment.notes}
+        />
       </div>
       <div className="mt-5 grid grid-cols-2 gap-2">
         <Button onClick={onConfirm}>Confirm</Button>
@@ -1264,9 +1271,11 @@ function AppointmentDetailPanel({
             <IconPlayerPlay />
             Start Session
           </Button>
-          <Button variant="outline" className="justify-start">
-            <IconFileText />
-            Start note
+          <Button variant="outline" className="justify-start" asChild>
+            <Link href={`/admin/clinical-notes?appointmentId=${appointment.id}`}>
+              <IconFileText />
+              {appointment.noteId ? "Open note" : "Start note"}
+            </Link>
           </Button>
           <Button variant="outline" className="justify-start">
             <IconMessageCircle />
@@ -1541,6 +1550,8 @@ function toAppointment(id: string, data: Record<string, unknown>): Appointment {
     reason: getString(data.reason, "Appointment"),
     billing: getString(data.billing, "Billing not checked"),
     notes: getString(data.notes, "Not started"),
+    noteId: getString(data.noteId),
+    noteStatus: getString(data.noteStatus),
     message: getString(data.message, "No messages."),
     reminderSentAt: getString(data.reminderSentAt),
   };
