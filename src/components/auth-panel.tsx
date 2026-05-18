@@ -10,7 +10,7 @@ import {
   signInWithEmailAndPassword,
   updateProfile,
 } from "firebase/auth";
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -48,6 +48,10 @@ export function AuthPanel({ mode }: AuthPanelProps) {
       router.replace("/admin/dashboard");
     }
   }, [authStatus, router]);
+
+  React.useEffect(() => {
+    router.prefetch("/admin/dashboard");
+  }, [router]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -99,14 +103,8 @@ export function AuthPanel({ mode }: AuthPanelProps) {
           email,
           password,
         );
-        const userSnapshot = await getDoc(doc(db, "users", credential.user.uid));
 
-        setAuthUser(
-          buildAuthUser(
-            credential.user,
-            userSnapshot.exists() ? userSnapshot.data() : undefined,
-          ),
-        );
+        setAuthUser(buildAuthUser(credential.user));
       }
 
       router.replace("/admin/dashboard");

@@ -34,6 +34,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -63,6 +64,7 @@ type Appointment = {
   provider: string;
   day: string;
   date: number;
+  dateKey: string;
   time: string;
   duration: string;
   type: string;
@@ -88,25 +90,32 @@ type SelectOption = {
   label: string;
 };
 
-const days = [
-  { label: "Mon", date: 11 },
-  { label: "Tue", date: 12 },
-  { label: "Wed", date: 13 },
-  { label: "Thu", date: 14 },
-  { label: "Fri", date: 15 },
-  { label: "Sat", date: 16 },
-  { label: "Sun", date: 17 },
-];
-const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const mayStartOffset = 5;
-const monthDays = Array.from({ length: 31 }, (_, index) => {
-  const date = index + 1;
+type CalendarDay = {
+  dateKey: string;
+  label: string;
+  dayNumber: number;
+  monthLabel: string;
+  isCurrentMonth: boolean;
+  isPast: boolean;
+};
 
-  return {
-    date,
-    label: weekdayLabels[(mayStartOffset + index) % 7],
-  };
-});
+const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const monthLabels = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+const todayKey = getDateKey(new Date());
+const tomorrowKey = addDays(todayKey, 1);
 
 const timeSlots = [
   "8:00 AM",
@@ -127,11 +136,6 @@ const demoPatientNames = [
   "Morgan Lee",
 ];
 const visitTypes = ["Therapy", "Intake", "Lab review", "Follow-up"];
-
-const dateOptions: SelectOption[] = monthDays.map((day) => ({
-  value: String(day.date),
-  label: `${day.label}, May ${day.date}`,
-}));
 
 const statusStyles: Record<AppointmentStatus, string> = {
   Pending: "border-amber-200 bg-amber-50 text-amber-700",
@@ -154,7 +158,7 @@ const riskStyles: Record<RiskLevel, string> = {
 const initialForm: AppointmentForm = {
   patient: demoPatientNames[0],
   provider: "Dr Smith",
-  date: "13",
+  date: todayKey,
   time: "2:30 PM",
   type: visitTypes[0],
 };
@@ -167,7 +171,7 @@ export default function SchedulingPage() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [viewMode, setViewMode] = React.useState<ViewMode>("Week");
   const [displayMode, setDisplayMode] = React.useState<DisplayMode>("Calendar");
-  const [selectedDate, setSelectedDate] = React.useState(13);
+  const [selectedDateKey, setSelectedDateKey] = React.useState(todayKey);
   const [providerFilter, setProviderFilter] = React.useState("All Providers");
   const [newDialogOpen, setNewDialogOpen] = React.useState(false);
   const [newForm, setNewForm] = React.useState<AppointmentForm>(initialForm);
@@ -185,7 +189,7 @@ export default function SchedulingPage() {
             toAppointment(snapshotDoc.id, snapshotDoc.data()),
           )
           .sort((first, second) => {
-            const dateDelta = first.date - second.date;
+            const dateDelta = first.dateKey.localeCompare(second.dateKey);
             return dateDelta || getTimeIndex(first.time) - getTimeIndex(second.time);
           });
 
@@ -196,13 +200,15 @@ export default function SchedulingPage() {
           (appointment) => appointment.id === activeAppointmentIdRef.current,
         );
 
-        if (
-          (!activeAppointmentIdRef.current || !activeExists) &&
-          nextAppointments[0]
-        ) {
-          activeAppointmentIdRef.current = nextAppointments[0].id;
-          setActiveAppointmentId(nextAppointments[0].id);
-          setSelectedDate(nextAppointments[0].date);
+        if (!activeAppointmentIdRef.current || !activeExists) {
+          const nextUpcomingAppointment =
+            nextAppointments.find(
+              (appointment) => appointment.dateKey >= todayKey,
+            ) ?? null;
+
+          activeAppointmentIdRef.current = nextUpcomingAppointment?.id ?? "";
+          setActiveAppointmentId(nextUpcomingAppointment?.id ?? "");
+          setSelectedDateKey(nextUpcomingAppointment?.dateKey ?? todayKey);
         }
       },
       () => {
@@ -241,26 +247,29 @@ export default function SchedulingPage() {
   );
   const activeAppointment =
     appointments.find((appointment) => appointment.id === activeAppointmentId) ??
-    appointments[0] ??
     null;
-  const activeDate = selectedDate;
+  const activeDateKey = selectedDateKey;
+  const visibleMonth = parseDateKey(activeDateKey);
   const calendarDays =
-    viewMode === "Day" ? [getDayFromDate(String(activeDate))] : days;
+    viewMode === "Day" ? [getCalendarDay(activeDateKey)] : getWeekDays(activeDateKey);
+  const monthCalendarDays = getMonthCalendarDays(activeDateKey);
+  const activeMonthKey = activeDateKey.slice(0, 7);
+  const weekDateKeys = new Set(calendarDays.map((day) => day.dateKey));
   const rangeAppointments = visibleAppointments.filter((appointment) => {
     if (viewMode === "Day") {
-      return appointment.date === activeDate;
+      return appointment.dateKey === activeDateKey;
     }
 
     if (viewMode === "Week") {
-      return days.some((day) => day.date === appointment.date);
+      return weekDateKeys.has(appointment.dateKey);
     }
 
-    return appointment.date >= 1 && appointment.date <= 31;
+    return appointment.dateKey.startsWith(activeMonthKey);
   });
   const pendingReminders = appointments.filter(
     (appointment) =>
       appointment.status === "Pending" &&
-      appointment.date === 14 &&
+      appointment.dateKey === tomorrowKey &&
       !appointment.reminderSentAt,
   );
 
@@ -268,10 +277,34 @@ export default function SchedulingPage() {
     setNewForm((current) => ({ ...current, [field]: value }));
   }
 
-  async function createAppointment() {
-    const day = getDayFromDate(newForm.date);
+  function moveVisibleDate(direction: -1 | 1) {
+    const nextDateKey =
+      viewMode === "Day"
+        ? addDays(activeDateKey, direction)
+        : viewMode === "Week"
+          ? addDays(activeDateKey, direction * 7)
+          : addMonths(activeDateKey, direction);
 
-    if (hasConflict(appointments, newForm.provider, day.date, newForm.time)) {
+    setSelectedDateKey(nextDateKey);
+  }
+
+  function jumpToDate(dateKey: string) {
+    if (!isDateKey(dateKey)) return;
+
+    setSelectedDateKey(dateKey);
+  }
+
+  async function createAppointment() {
+    if (isBeforeTodayKey(newForm.date)) {
+      toast.error("Past dates cannot be booked", {
+        description: "Choose today or a future date for this appointment.",
+      });
+      return;
+    }
+
+    const day = getCalendarDay(newForm.date);
+
+    if (hasConflict(appointments, newForm.provider, day.dateKey, newForm.time)) {
       toast.error("Scheduling conflict", {
         description: `${newForm.provider} already has an appointment at ${newForm.time} on ${day.label}.`,
       });
@@ -283,7 +316,10 @@ export default function SchedulingPage() {
         patient: newForm.patient,
         provider: newForm.provider,
         day: day.label,
-        date: day.date,
+        date: day.dayNumber,
+        dateKey: day.dateKey,
+        month: parseDateKey(day.dateKey).getMonth() + 1,
+        year: parseDateKey(day.dateKey).getFullYear(),
         time: newForm.time,
         duration: "50 min",
         type: newForm.type,
@@ -303,10 +339,10 @@ export default function SchedulingPage() {
       });
 
       setActiveAppointmentId(createdAppointment.id);
-      setSelectedDate(day.date);
+      setSelectedDateKey(day.dateKey);
       setNewDialogOpen(false);
       toast.success("Appointment scheduled", {
-        description: `${newForm.patient} was added to ${day.label}, May ${day.date}.`,
+        description: `${newForm.patient} was added to ${formatFullDate(day.dateKey)}.`,
       });
     } catch {
       toast.error("Appointment was not created", {
@@ -369,13 +405,20 @@ export default function SchedulingPage() {
       return;
     }
 
-    const day = getDayFromDate(form.date);
+    if (isBeforeTodayKey(form.date)) {
+      toast.error("Past dates cannot be booked", {
+        description: "Choose today or a future date for this appointment.",
+      });
+      return;
+    }
+
+    const day = getCalendarDay(form.date);
 
     if (
       hasConflict(
         appointments,
         form.provider,
-        day.date,
+        day.dateKey,
         form.time,
         activeAppointment.id,
       )
@@ -390,7 +433,10 @@ export default function SchedulingPage() {
       await updateDoc(doc(db, "appointments", activeAppointment.id), {
         provider: form.provider,
         day: day.label,
-        date: day.date,
+        date: day.dayNumber,
+        dateKey: day.dateKey,
+        month: parseDateKey(day.dateKey).getMonth() + 1,
+        year: parseDateKey(day.dateKey).getFullYear(),
         time: form.time,
         type: form.type,
         status: "Pending",
@@ -399,9 +445,9 @@ export default function SchedulingPage() {
       });
 
       toast.success("Appointment rescheduled", {
-        description: `${activeAppointment.patient} moved to ${day.label}, May ${day.date} at ${form.time}.`,
+        description: `${activeAppointment.patient} moved to ${formatFullDate(day.dateKey)} at ${form.time}.`,
       });
-      setSelectedDate(day.date);
+      setSelectedDateKey(day.dateKey);
     } catch {
       toast.error("Appointment was not rescheduled", {
         description: "This appointment could not be updated.",
@@ -430,6 +476,9 @@ export default function SchedulingPage() {
             onChange={updateNewForm}
             onCreate={createAppointment}
           />
+          <Button variant="outline" onClick={() => setSelectedDateKey(todayKey)}>
+            Today
+          </Button>
           <div className="flex rounded-md border bg-background p-1">
             {(["Calendar", "Table"] as DisplayMode[]).map((mode) => (
               <Button
@@ -450,17 +499,16 @@ export default function SchedulingPage() {
                 variant={viewMode === mode ? "default" : "ghost"}
                 onClick={() => {
                   setViewMode(mode);
-                  if (mode === "Month") setDisplayMode("Table");
                 }}
               >
                 {mode}
               </Button>
             ))}
           </div>
-          <Button variant="outline" size="icon">
+          <Button variant="outline" size="icon" onClick={() => moveVisibleDate(-1)}>
             <IconChevronLeft />
           </Button>
-          <Button variant="outline" size="icon">
+          <Button variant="outline" size="icon" onClick={() => moveVisibleDate(1)}>
             <IconChevronRight />
           </Button>
           <Select value={providerFilter} onValueChange={setProviderFilter}>
@@ -498,30 +546,56 @@ export default function SchedulingPage() {
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-[220px_minmax(0,1fr)_280px]">
         <aside className="hidden min-h-0 overflow-hidden rounded-lg border bg-card xl:flex xl:flex-col">
           <div className="border-b p-4">
-            <h3 className="font-semibold">May 2026</h3>
-            <p className="text-muted-foreground text-sm">Mini calendar</p>
+            <h3 className="font-semibold">{formatMonthYear(visibleMonth)}</h3>
+            <p className="text-muted-foreground text-sm">Calendar navigator</p>
           </div>
           <MiniCalendar
-            selectedDate={activeDate}
-            appointmentDates={appointments.map((appointment) => appointment.date)}
-            onSelectDate={(date) => {
-              setSelectedDate(date);
+            selectedDateKey={activeDateKey}
+            monthDate={visibleMonth}
+            appointmentDateKeys={appointments.map((appointment) => appointment.dateKey)}
+            onPreviousMonth={() => setSelectedDateKey(addMonths(activeDateKey, -1))}
+            onNextMonth={() => setSelectedDateKey(addMonths(activeDateKey, 1))}
+            onToday={() => setSelectedDateKey(todayKey)}
+            onSelectDate={(dateKey) => {
+              setSelectedDateKey(dateKey);
               setViewMode("Day");
-              const appointment = appointments.find((item) => item.date === date);
+              const appointment = appointments.find((item) => item.dateKey === dateKey);
               if (appointment) setActiveAppointmentId(appointment.id);
             }}
           />
         </aside>
 
-        {displayMode === "Calendar" ? (
+        {displayMode === "Calendar" && viewMode === "Month" ? (
+          <MonthCalendar
+            days={monthCalendarDays}
+            appointments={visibleAppointments}
+            activeAppointmentId={activeAppointment?.id ?? ""}
+            selectedDateKey={activeDateKey}
+            onPrevious={() => moveVisibleDate(-1)}
+            onNext={() => moveVisibleDate(1)}
+            onToday={() => setSelectedDateKey(todayKey)}
+            onJumpToDate={jumpToDate}
+            onSelectDate={setSelectedDateKey}
+            onSelectAppointment={(appointment) => {
+              setActiveAppointmentId(appointment.id);
+              setSelectedDateKey(appointment.dateKey);
+            }}
+          />
+        ) : displayMode === "Calendar" ? (
           <CalendarGrid
             activeAppointmentId={activeAppointment?.id ?? ""}
             days={calendarDays}
             appointments={visibleAppointments}
-            selectedDate={activeDate}
+            selectedDateKey={activeDateKey}
+            viewMode={viewMode}
+            onPrevious={() => moveVisibleDate(-1)}
+            onNext={() => moveVisibleDate(1)}
+            onToday={() => setSelectedDateKey(todayKey)}
+            onJumpToDate={jumpToDate}
+            onSelectDate={setSelectedDateKey}
             onSelectAppointment={(appointment) => {
               setActiveAppointmentId(appointment.id);
-              setSelectedDate(appointment.date);
+              setSelectedDateKey(appointment.dateKey);
             }}
           />
         ) : (
@@ -530,10 +604,10 @@ export default function SchedulingPage() {
             activeAppointmentId={activeAppointment?.id ?? ""}
             isLoading={isLoading}
             viewMode={viewMode}
-            selectedDate={activeDate}
+            selectedDateKey={activeDateKey}
             onSelectAppointment={(appointment) => {
               setActiveAppointmentId(appointment.id);
-              setSelectedDate(appointment.date);
+              setSelectedDateKey(appointment.dateKey);
             }}
           />
         )}
@@ -568,19 +642,40 @@ function CalendarGrid({
   days: visibleDays,
   appointments,
   activeAppointmentId,
-  selectedDate,
+  selectedDateKey,
+  viewMode,
+  onPrevious,
+  onNext,
+  onToday,
+  onJumpToDate,
+  onSelectDate,
   onSelectAppointment,
 }: {
-  days: typeof days;
+  days: CalendarDay[];
   appointments: Appointment[];
   activeAppointmentId: string;
-  selectedDate: number;
+  selectedDateKey: string;
+  viewMode: ViewMode;
+  onPrevious: () => void;
+  onNext: () => void;
+  onToday: () => void;
+  onJumpToDate: (dateKey: string) => void;
+  onSelectDate: (dateKey: string) => void;
   onSelectAppointment: (appointment: Appointment) => void;
 }) {
   const gridTemplateColumns = `56px repeat(${visibleDays.length}, minmax(0, 1fr))`;
 
   return (
     <main className="min-h-0 min-w-0 overflow-hidden rounded-lg border bg-card">
+      <CalendarNavigationHeader
+        title={getViewTitle(viewMode, selectedDateKey)}
+        viewMode={viewMode}
+        selectedDateKey={selectedDateKey}
+        onPrevious={onPrevious}
+        onNext={onNext}
+        onToday={onToday}
+        onJumpToDate={onJumpToDate}
+      />
       <div
         className="grid border-b bg-muted/60"
         style={{ gridTemplateColumns }}
@@ -588,14 +683,17 @@ function CalendarGrid({
         <div className="border-r p-2 text-xs font-medium">Time</div>
         {visibleDays.map((day) => (
           <button
-            key={`${day.label}-${day.date}`}
+            key={day.dateKey}
             type="button"
+            onClick={() => onSelectDate(day.dateKey)}
             className={`border-r p-2 text-left text-xs last:border-r-0 ${
-              day.date === selectedDate ? "bg-primary/10" : ""
+              day.dateKey === selectedDateKey ? "bg-primary/10" : ""
             }`}
           >
             <p className="font-medium">{day.label}</p>
-            <p className="text-muted-foreground">May {day.date}</p>
+            <p className="text-muted-foreground">
+              {day.monthLabel} {day.dayNumber}
+            </p>
           </button>
         ))}
       </div>
@@ -612,19 +710,24 @@ function CalendarGrid({
             {visibleDays.map((day) => {
               const slotAppointments = appointments.filter(
                 (appointment) =>
-                  appointment.date === day.date && appointment.time === time,
+                  appointment.dateKey === day.dateKey &&
+                  appointment.time === time,
               );
 
               return (
                 <div
-                  key={`${day.label}-${day.date}-${time}`}
+                  key={`${day.dateKey}-${time}`}
+                  onClick={() => onSelectDate(day.dateKey)}
                   className="min-w-0 border-r p-1.5 last:border-r-0"
                 >
                   {slotAppointments.map((appointment) => (
                     <button
                       key={appointment.id}
                       type="button"
-                      onClick={() => onSelectAppointment(appointment)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onSelectAppointment(appointment);
+                      }}
                       className={`mb-2 w-full rounded-md border border-l-4 p-2 text-left text-[11px] transition-colors ${
                         blockStyles[appointment.status]
                       } ${
@@ -663,22 +766,25 @@ function AppointmentTable({
   activeAppointmentId,
   isLoading,
   viewMode,
-  selectedDate,
+  selectedDateKey,
   onSelectAppointment,
 }: {
   appointments: Appointment[];
   activeAppointmentId: string;
   isLoading: boolean;
   viewMode: ViewMode;
-  selectedDate: number;
+  selectedDateKey: string;
   onSelectAppointment: (appointment: Appointment) => void;
 }) {
+  const weekDays = getWeekDays(selectedDateKey);
   const title =
     viewMode === "Day"
-      ? `${getDayFromDate(String(selectedDate)).label}, May ${selectedDate}`
+      ? formatFullDate(selectedDateKey)
       : viewMode === "Week"
-        ? "May 11-17"
-        : "May 2026";
+        ? `${formatShortMonthDay(weekDays[0].dateKey)} - ${formatShortMonthDay(
+            weekDays[6].dateKey,
+          )}`
+        : formatMonthYear(parseDateKey(selectedDateKey));
 
   return (
     <main className="min-h-0 min-w-0 overflow-hidden rounded-lg border bg-card">
@@ -718,9 +824,7 @@ function AppointmentTable({
                     {appointment.reason}
                   </div>
                 </TableCell>
-                <TableCell>
-                  {appointment.day}, May {appointment.date}
-                </TableCell>
+                <TableCell>{formatFullDate(appointment.dateKey)}</TableCell>
                 <TableCell>{appointment.time}</TableCell>
                 <TableCell>{appointment.provider}</TableCell>
                 <TableCell>{appointment.type}</TableCell>
@@ -753,49 +857,239 @@ function AppointmentTable({
   );
 }
 
-function MiniCalendar({
-  selectedDate,
-  appointmentDates,
-  onSelectDate,
+function CalendarNavigationHeader({
+  title,
+  viewMode,
+  selectedDateKey,
+  onPrevious,
+  onNext,
+  onToday,
+  onJumpToDate,
 }: {
-  selectedDate: number;
-  appointmentDates: number[];
-  onSelectDate: (date: number) => void;
+  title: string;
+  viewMode: ViewMode;
+  selectedDateKey: string;
+  onPrevious: () => void;
+  onNext: () => void;
+  onToday: () => void;
+  onJumpToDate: (dateKey: string) => void;
 }) {
-  const firstDayOffset = 5;
-  const cells = Array.from({ length: 42 }, (_, index) => {
-    const date = index - firstDayOffset + 1;
-    return date >= 1 && date <= 31 ? date : null;
-  });
+  return (
+    <div className="flex flex-col gap-3 border-b p-3 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="font-semibold">{title}</h3>
+          <Badge variant="outline">{viewMode}</Badge>
+        </div>
+        <p className="text-muted-foreground text-xs">
+          Use the arrows or pick a date to jump the schedule.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" size="icon" onClick={onPrevious}>
+          <IconChevronLeft />
+        </Button>
+        <Button variant="outline" size="sm" onClick={onToday}>
+          Today
+        </Button>
+        <Button variant="outline" size="icon" onClick={onNext}>
+          <IconChevronRight />
+        </Button>
+        <Input
+          type="date"
+          value={selectedDateKey}
+          onChange={(event) => onJumpToDate(event.target.value)}
+          className="h-9 w-[150px]"
+          aria-label="Jump to date"
+        />
+      </div>
+    </div>
+  );
+}
+
+function MonthCalendar({
+  days,
+  appointments,
+  activeAppointmentId,
+  selectedDateKey,
+  onPrevious,
+  onNext,
+  onToday,
+  onJumpToDate,
+  onSelectDate,
+  onSelectAppointment,
+}: {
+  days: CalendarDay[];
+  appointments: Appointment[];
+  activeAppointmentId: string;
+  selectedDateKey: string;
+  onPrevious: () => void;
+  onNext: () => void;
+  onToday: () => void;
+  onJumpToDate: (dateKey: string) => void;
+  onSelectDate: (dateKey: string) => void;
+  onSelectAppointment: (appointment: Appointment) => void;
+}) {
+  const appointmentsByDate = appointments.reduce<Record<string, Appointment[]>>(
+    (groups, appointment) => {
+      groups[appointment.dateKey] = [
+        ...(groups[appointment.dateKey] ?? []),
+        appointment,
+      ];
+      return groups;
+    },
+    {},
+  );
 
   return (
-    <div className="grid grid-cols-7 gap-1 p-4 text-center text-sm">
-      {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
-        <div key={`${day}-${index}`} className="text-muted-foreground py-2 text-xs">
-          {day}
-        </div>
-      ))}
-      {cells.map((date, index) =>
-        date ? (
+    <main className="min-h-0 min-w-0 overflow-hidden rounded-lg border bg-card">
+      <CalendarNavigationHeader
+        title={getViewTitle("Month", selectedDateKey)}
+        viewMode="Month"
+        selectedDateKey={selectedDateKey}
+        onPrevious={onPrevious}
+        onNext={onNext}
+        onToday={onToday}
+        onJumpToDate={onJumpToDate}
+      />
+      <div className="grid grid-cols-7 border-b bg-muted/60">
+        {weekdayLabels.map((day) => (
+          <div key={day} className="border-r p-2 text-xs font-medium last:border-r-0">
+            {day}
+          </div>
+        ))}
+      </div>
+      <div className="grid h-full grid-cols-7 overflow-auto">
+        {days.map((day) => {
+          const dayAppointments = appointmentsByDate[day.dateKey] ?? [];
+
+          return (
+            <div
+              key={day.dateKey}
+              className={`min-h-24 border-b border-r p-2 text-left align-top last:border-r-0 ${
+                day.dateKey === selectedDateKey
+                  ? "bg-primary/10"
+                  : day.isCurrentMonth
+                    ? "bg-card hover:bg-muted/50"
+                    : "bg-muted/25 text-muted-foreground"
+              }`}
+            >
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => onSelectDate(day.dateKey)}
+                  className="rounded px-1 text-xs font-medium hover:bg-background"
+                >
+                  {day.dayNumber}
+                </button>
+                {day.dateKey === todayKey ? (
+                  <Badge variant="outline" className="text-[10px]">
+                    Today
+                  </Badge>
+                ) : null}
+              </div>
+              <div className="space-y-1">
+                {dayAppointments.slice(0, 3).map((appointment) => (
+                  <button
+                    key={appointment.id}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSelectAppointment(appointment);
+                    }}
+                    className={`block w-full rounded border border-l-4 px-2 py-1 text-left text-[11px] ${
+                      blockStyles[appointment.status]
+                    } ${
+                      appointment.id === activeAppointmentId
+                        ? "ring-2 ring-primary/40"
+                        : ""
+                    }`}
+                  >
+                    <span className="block truncate font-medium">
+                      {appointment.time} · {appointment.patient}
+                    </span>
+                    <span className="block truncate text-muted-foreground">
+                      {appointment.provider}
+                    </span>
+                  </button>
+                ))}
+                {dayAppointments.length > 3 ? (
+                  <span className="text-muted-foreground text-[11px]">
+                    +{dayAppointments.length - 3} more
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </main>
+  );
+}
+
+function MiniCalendar({
+  selectedDateKey,
+  monthDate,
+  appointmentDateKeys,
+  onPreviousMonth,
+  onNextMonth,
+  onToday,
+  onSelectDate,
+}: {
+  selectedDateKey: string;
+  monthDate: Date;
+  appointmentDateKeys: string[];
+  onPreviousMonth: () => void;
+  onNextMonth: () => void;
+  onToday: () => void;
+  onSelectDate: (dateKey: string) => void;
+}) {
+  const cells = getMonthCalendarDays(getDateKey(monthDate));
+  const appointmentDateSet = new Set(appointmentDateKeys);
+
+  return (
+    <div className="p-3">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <Button variant="outline" size="icon" onClick={onPreviousMonth}>
+          <IconChevronLeft />
+        </Button>
+        <Button variant="outline" size="sm" onClick={onToday}>
+          Today
+        </Button>
+        <Button variant="outline" size="icon" onClick={onNextMonth}>
+          <IconChevronRight />
+        </Button>
+      </div>
+      <div className="grid grid-cols-7 gap-1 text-center text-sm">
+        {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
+          <div
+            key={`${day}-${index}`}
+            className="text-muted-foreground py-2 text-xs"
+          >
+            {day}
+          </div>
+        ))}
+        {cells.map((day) => (
           <button
-            key={date}
+            key={day.dateKey}
             type="button"
-            onClick={() => onSelectDate(date)}
+            onClick={() => onSelectDate(day.dateKey)}
             className={`relative rounded-md py-2 text-sm ${
-              selectedDate === date
+              selectedDateKey === day.dateKey
                 ? "bg-primary text-primary-foreground"
-                : "hover:bg-muted"
+                : day.dateKey === todayKey
+                  ? "bg-primary/10 text-primary hover:bg-primary/15"
+                  : day.isCurrentMonth
+                    ? "hover:bg-muted"
+                    : "text-muted-foreground/45 hover:bg-muted/60"
             }`}
           >
-            {date}
-            {appointmentDates.includes(date) ? (
+            {day.dayNumber}
+            {appointmentDateSet.has(day.dateKey) ? (
               <span className="absolute bottom-1 left-1/2 size-1 -translate-x-1/2 rounded-full bg-current" />
             ) : null}
           </button>
-        ) : (
-          <div key={`blank-${index}`} aria-hidden="true" />
-        ),
-      )}
+        ))}
+      </div>
     </div>
   );
 }
@@ -835,7 +1129,7 @@ function AppointmentDetailPanel({
       <div className="grid gap-4 text-sm">
         <DetailRow
           label="Date"
-          value={`${appointment.day}, May ${appointment.date}, 2026`}
+          value={formatFullDate(appointment.dateKey)}
         />
         <DetailRow label="Time" value={appointment.time} />
         <DetailRow label="Duration" value={appointment.duration} />
@@ -942,7 +1236,7 @@ function RescheduleDialog({
   const [form, setForm] = React.useState<AppointmentForm>({
     patient: appointment.patient,
     provider: appointment.provider,
-    date: String(appointment.date),
+    date: appointment.dateKey,
     time: appointment.time,
     type: appointment.type,
   });
@@ -951,7 +1245,7 @@ function RescheduleDialog({
     setForm({
       patient: appointment.patient,
       provider: appointment.provider,
-      date: String(appointment.date),
+      date: appointment.dateKey,
       time: appointment.time,
       type: appointment.type,
     });
@@ -1035,12 +1329,19 @@ function AppointmentFields({
           .filter((item) => item !== "All Providers")
           .map((provider) => ({ value: provider, label: provider }))}
       />
-      <SelectField
-        label="Date"
-        value={form.date}
-        onChange={(value) => onChange("date", value)}
-        items={dateOptions}
-      />
+      <div className="grid gap-2">
+        <Label htmlFor="appointment-date">Date</Label>
+        <Input
+          id="appointment-date"
+          type="date"
+          min={todayKey}
+          value={form.date}
+          onChange={(event) => onChange("date", event.target.value)}
+        />
+        <p className="text-muted-foreground text-xs">
+          Past dates are locked for new bookings.
+        </p>
+      </div>
       <SelectField
         label="Time"
         value={form.time}
@@ -1090,15 +1391,17 @@ function SelectField({
 }
 
 function toAppointment(id: string, data: Record<string, unknown>): Appointment {
-  const date = getNumber(data.date, 13);
-  const day = getString(data.day, getDayFromDate(String(date)).label);
+  const dateKey = getAppointmentDateKey(data);
+  const calendarDay = getCalendarDay(dateKey);
+  const day = getString(data.day, calendarDay.label);
 
   return {
     id,
     patient: getString(data.patient, "Unnamed patient"),
     provider: getString(data.provider, "Unassigned"),
     day,
-    date,
+    date: calendarDay.dayNumber,
+    dateKey,
     time: getString(data.time, "10:00 AM"),
     duration: getString(data.duration, "50 min"),
     type: getString(data.type, "Therapy"),
@@ -1115,7 +1418,7 @@ function toAppointment(id: string, data: Record<string, unknown>): Appointment {
 function hasConflict(
   appointments: Appointment[],
   provider: string,
-  date: number,
+  dateKey: string,
   time: string,
   ignoredId?: string,
 ) {
@@ -1124,14 +1427,140 @@ function hasConflict(
       appointment.id !== ignoredId &&
       appointment.status !== "Cancelled" &&
       appointment.provider === provider &&
-      appointment.date === date &&
+      appointment.dateKey === dateKey &&
       appointment.time === time,
   );
 }
 
-function getDayFromDate(value: string) {
-  const date = Number(value);
-  return days.find((day) => day.date === date) ?? days[2];
+function getAppointmentDateKey(data: Record<string, unknown>) {
+  const storedDateKey = getString(data.dateKey);
+
+  if (isDateKey(storedDateKey)) {
+    return storedDateKey;
+  }
+
+  const year = getNumber(data.year, 2026);
+  const month = getNumber(data.month, 5);
+  const date = getNumber(data.date, 13);
+
+  return `${year}-${padDatePart(month)}-${padDatePart(date)}`;
+}
+
+function getCalendarDay(dateKey: string): CalendarDay {
+  const date = parseDateKey(dateKey);
+  const monthDate = new Date(date.getFullYear(), date.getMonth(), 1);
+
+  return {
+    dateKey: getDateKey(date),
+    label: weekdayLabels[date.getDay()],
+    dayNumber: date.getDate(),
+    monthLabel: monthLabels[date.getMonth()].slice(0, 3),
+    isCurrentMonth: date.getMonth() === monthDate.getMonth(),
+    isPast: isBeforeTodayKey(getDateKey(date)),
+  };
+}
+
+function getWeekDays(dateKey: string) {
+  const selectedDate = parseDateKey(dateKey);
+  const mondayOffset = selectedDate.getDay() === 0 ? -6 : 1 - selectedDate.getDay();
+  const monday = new Date(
+    selectedDate.getFullYear(),
+    selectedDate.getMonth(),
+    selectedDate.getDate() + mondayOffset,
+  );
+
+  return Array.from({ length: 7 }, (_, index) =>
+    getCalendarDay(getDateKey(addDaysToDate(monday, index))),
+  );
+}
+
+function getMonthCalendarDays(dateKey: string) {
+  const selectedDate = parseDateKey(dateKey);
+  const monthStart = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+  const gridStart = new Date(
+    monthStart.getFullYear(),
+    monthStart.getMonth(),
+    1 - monthStart.getDay(),
+  );
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = addDaysToDate(gridStart, index);
+
+    return {
+      ...getCalendarDay(getDateKey(date)),
+      isCurrentMonth: date.getMonth() === selectedDate.getMonth(),
+    };
+  });
+}
+
+function parseDateKey(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+
+  if (!year || !month || !day) {
+    return parseDateKey(todayKey);
+  }
+
+  return new Date(year, month - 1, day);
+}
+
+function getDateKey(date: Date) {
+  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(
+    date.getDate(),
+  )}`;
+}
+
+function addDays(dateKey: string, amount: number) {
+  return getDateKey(addDaysToDate(parseDateKey(dateKey), amount));
+}
+
+function addMonths(dateKey: string, amount: number) {
+  const date = parseDateKey(dateKey);
+  return getDateKey(new Date(date.getFullYear(), date.getMonth() + amount, 1));
+}
+
+function addDaysToDate(date: Date, amount: number) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + amount);
+}
+
+function isBeforeTodayKey(dateKey: string) {
+  return dateKey < todayKey;
+}
+
+function isDateKey(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function padDatePart(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function formatMonthYear(date: Date) {
+  return `${monthLabels[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+function formatShortMonthDay(dateKey: string) {
+  const date = parseDateKey(dateKey);
+  return `${monthLabels[date.getMonth()].slice(0, 3)} ${date.getDate()}`;
+}
+
+function formatFullDate(dateKey: string) {
+  const date = parseDateKey(dateKey);
+  return `${weekdayLabels[date.getDay()]}, ${monthLabels[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+}
+
+function getViewTitle(viewMode: ViewMode, dateKey: string) {
+  if (viewMode === "Day") {
+    return formatFullDate(dateKey);
+  }
+
+  if (viewMode === "Week") {
+    const weekDays = getWeekDays(dateKey);
+    return `${formatShortMonthDay(weekDays[0].dateKey)} - ${formatShortMonthDay(
+      weekDays[6].dateKey,
+    )}, ${parseDateKey(weekDays[6].dateKey).getFullYear()}`;
+  }
+
+  return formatMonthYear(parseDateKey(dateKey));
 }
 
 function getTimeIndex(time: string) {

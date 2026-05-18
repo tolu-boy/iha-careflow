@@ -11,7 +11,7 @@ import {
 } from "@/lib/permissions";
 
 let cachedRoles: RolePermissionConfig[] = defaultRoles;
-let cachedLoaded = false;
+let cachedLoaded = true;
 let unsubscribeRoles: (() => void) | undefined;
 const listeners = new Set<
   React.Dispatch<
