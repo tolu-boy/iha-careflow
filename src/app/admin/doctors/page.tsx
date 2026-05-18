@@ -66,6 +66,19 @@ type DoctorDraft = {
   status: DoctorStatus;
 };
 
+type ScheduledAppointment = {
+  id: string;
+  patientId: string;
+  patient: string;
+  doctorId: string;
+  doctorName: string;
+  dateKey: string;
+  time: string;
+  type: string;
+  risk: "Low" | "Medium" | "High";
+  status: string;
+};
+
 const statusStyles: Record<DoctorStatus, string> = {
   Available: "border-emerald-200 bg-emerald-50 text-emerald-700",
   "In Session": "border-sky-200 bg-sky-50 text-sky-700",
@@ -97,9 +110,12 @@ const emptyDraft: DoctorDraft = {
   npi: "",
   status: "Available",
 };
+const todayKey = getDateKey(new Date());
+const scheduleCapacity = 8;
 
 export default function DoctorsPage() {
   const [doctors, setDoctors] = React.useState<Doctor[]>([]);
+  const [appointments, setAppointments] = React.useState<ScheduledAppointment[]>([]);
   const [activeDoctorId, setActiveDoctorId] = React.useState("");
   const [search, setSearch] = React.useState("");
   const [specialtyFilter, setSpecialtyFilter] = React.useState("All Specialties");
@@ -136,7 +152,27 @@ export default function DoctorsPage() {
     return unsubscribe;
   }, []);
 
-  const filteredDoctors = doctors.filter((doctor) => {
+  React.useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "appointments"), (snapshot) => {
+      const nextAppointments = snapshot.docs
+        .map((item) => toScheduledAppointment(item.id, item.data()))
+        .sort((first, second) => {
+          const dateDelta = first.dateKey.localeCompare(second.dateKey);
+          return dateDelta || first.time.localeCompare(second.time);
+        });
+
+      setAppointments(nextAppointments);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  const connectedDoctors = React.useMemo(
+    () => doctors.map((doctor) => connectDoctorSchedule(doctor, appointments)),
+    [appointments, doctors],
+  );
+
+  const filteredDoctors = connectedDoctors.filter((doctor) => {
     const query = search.trim().toLowerCase();
     const matchesSearch =
       !query ||
@@ -154,12 +190,14 @@ export default function DoctorsPage() {
   });
 
   const activeDoctor =
-    doctors.find((doctor) => doctor.id === activeDoctorId) ?? doctors[0] ?? null;
+    connectedDoctors.find((doctor) => doctor.id === activeDoctorId) ??
+    connectedDoctors[0] ??
+    null;
 
   const summaryCards = [
     {
       label: "Active doctors",
-      value: doctors
+      value: connectedDoctors
         .filter((doctor) => doctor.status !== "Credentialing")
         .length.toString(),
       note: "Available for care workflows",
@@ -167,7 +205,7 @@ export default function DoctorsPage() {
     },
     {
       label: "Visits today",
-      value: doctors
+      value: connectedDoctors
         .reduce((total, doctor) => total + doctor.todayAppointments, 0)
         .toString(),
       note: "Across doctor schedules",
@@ -175,7 +213,7 @@ export default function DoctorsPage() {
     },
     {
       label: "Open notes",
-      value: doctors
+      value: connectedDoctors
         .reduce((total, doctor) => total + doctor.openNotes, 0)
         .toString(),
       note: "Need completion or signature",
@@ -183,7 +221,7 @@ export default function DoctorsPage() {
     },
     {
       label: "Available slots",
-      value: doctors
+      value: connectedDoctors
         .reduce((total, doctor) => total + doctor.availableSlots, 0)
         .toString(),
       note: "Capacity for new appointments",
@@ -245,7 +283,7 @@ export default function DoctorsPage() {
       <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">
-            Doctors & Providers
+            Doctors
           </h2>
           <p className="text-muted-foreground text-sm">
             Manage doctor profiles, schedule capacity, open notes, and care
@@ -286,7 +324,7 @@ export default function DoctorsPage() {
           <div className="border-b p-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <h3 className="font-semibold">Provider directory</h3>
+                <h3 className="font-semibold">Doctor directory</h3>
                 <p className="text-muted-foreground text-sm">
                   {isLoading
                     ? "Loading doctors"
@@ -848,6 +886,94 @@ function DetailText({ label, value }: { label: string; value: string }) {
   );
 }
 
+function connectDoctorSchedule(
+  doctor: Doctor,
+  appointments: ScheduledAppointment[],
+): Doctor {
+  const doctorAppointments = appointments.filter(
+    (appointment) =>
+      appointment.doctorId === doctor.id ||
+      (!appointment.doctorId && appointment.doctorName === doctor.name),
+  );
+  const todayAppointments = doctorAppointments.filter(
+    (appointment) =>
+      appointment.dateKey === todayKey && appointment.status !== "Cancelled",
+  );
+  const futureAppointments = doctorAppointments.filter(
+    (appointment) =>
+      appointment.dateKey >= todayKey && appointment.status !== "Cancelled",
+  );
+  const assignedPatients = new Set(
+    doctorAppointments
+      .filter((appointment) => appointment.status !== "Cancelled")
+      .map((appointment) => appointment.patientId || appointment.patient),
+  );
+  const highRiskPatients = new Set(
+    doctorAppointments
+      .filter(
+        (appointment) =>
+          appointment.status !== "Cancelled" && appointment.risk === "High",
+      )
+      .map((appointment) => appointment.patientId || appointment.patient),
+  );
+  const availableSlots =
+    doctor.status === "Credentialing"
+      ? 0
+      : Math.max(0, scheduleCapacity - todayAppointments.length);
+  const nextAvailable =
+    availableSlots > 0
+      ? "Today has open slots"
+      : futureAppointments[0]
+        ? `${formatShortDate(futureAppointments[0].dateKey)} ${futureAppointments[0].time}`
+        : doctor.nextAvailable;
+
+  return {
+    ...doctor,
+    todayAppointments: todayAppointments.length,
+    availableSlots,
+    panelCount: assignedPatients.size,
+    highRiskPanel: highRiskPatients.size,
+    capacity:
+      doctor.status === "Credentialing"
+        ? 0
+        : Math.min(
+            100,
+            Math.round((todayAppointments.length / scheduleCapacity) * 100),
+          ),
+    nextAvailable,
+    upcoming:
+      futureAppointments.length > 0
+        ? futureAppointments.slice(0, 4).map(
+            (appointment) =>
+              `${formatShortDate(appointment.dateKey)} ${appointment.time} - ${appointment.patient} - ${appointment.type}`,
+          )
+        : doctor.upcoming,
+  };
+}
+
+function toScheduledAppointment(
+  id: string,
+  data: Record<string, unknown>,
+): ScheduledAppointment {
+  const doctorName =
+    getString(data.doctorName, "") || getString(data.provider, "Unassigned");
+  const patient =
+    getString(data.patientName, "") || getString(data.patient, "Unnamed patient");
+
+  return {
+    id,
+    patientId: getString(data.patientId, ""),
+    patient,
+    doctorId: getString(data.doctorId, ""),
+    doctorName,
+    dateKey: getAppointmentDateKey(data),
+    time: getString(data.time, "10:00 AM"),
+    type: getString(data.type, "Appointment"),
+    risk: getRisk(data.risk),
+    status: getString(data.status, "Pending"),
+  };
+}
+
 function toDoctor(id: string, data: Record<string, unknown>): Doctor {
   const name =
     getString(data.name, "") ||
@@ -893,6 +1019,35 @@ function toDoctor(id: string, data: Record<string, unknown>): Doctor {
     ]),
     focus: getString(data.focus, `${getString(data.specialty, "Doctor")} care.`),
   };
+}
+
+function getAppointmentDateKey(data: Record<string, unknown>) {
+  const storedDateKey = getString(data.dateKey, "");
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(storedDateKey)) {
+    return storedDateKey;
+  }
+
+  const year = getNumber(data.year, 2026);
+  const month = getNumber(data.month, 5);
+  const date = getNumber(data.date, 13);
+
+  return `${year}-${padDatePart(month)}-${padDatePart(date)}`;
+}
+
+function getDateKey(date: Date) {
+  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(
+    date.getDate(),
+  )}`;
+}
+
+function padDatePart(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function formatShortDate(dateKey: string) {
+  const [, month, day] = dateKey.split("-");
+  return `${month}/${day}`;
 }
 
 function createDoctorFromDraft(draft: DoctorDraft): Doctor {
@@ -983,6 +1138,14 @@ function getDoctorStatus(value: unknown): DoctorStatus {
   }
 
   return "Available";
+}
+
+function getRisk(value: unknown): ScheduledAppointment["risk"] {
+  if (value === "Low" || value === "Medium" || value === "High") {
+    return value;
+  }
+
+  return "Medium";
 }
 
 function getInitials(name: string) {

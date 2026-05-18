@@ -14,12 +14,12 @@ import {
   IconShieldCheck,
 } from "@tabler/icons-react";
 import {
-  addDoc,
   collection,
   doc,
   onSnapshot,
   serverTimestamp,
   updateDoc,
+  writeBatch,
 } from "firebase/firestore";
 import { toast } from "sonner";
 
@@ -60,7 +60,9 @@ type RiskLevel = "Low" | "Medium" | "High";
 
 type Appointment = {
   id: string;
+  patientId: string;
   patient: string;
+  doctorId: string;
   provider: string;
   day: string;
   date: number;
@@ -78,8 +80,8 @@ type Appointment = {
 };
 
 type AppointmentForm = {
-  patient: string;
-  provider: string;
+  patientId: string;
+  doctorId: string;
   date: string;
   time: string;
   type: string;
@@ -97,6 +99,21 @@ type CalendarDay = {
   monthLabel: string;
   isCurrentMonth: boolean;
   isPast: boolean;
+};
+
+type PatientOption = {
+  id: string;
+  name: string;
+  risk: RiskLevel;
+  reason: string;
+  billing: string;
+};
+
+type DoctorOption = {
+  id: string;
+  name: string;
+  specialty: string;
+  status: string;
 };
 
 const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -127,14 +144,7 @@ const timeSlots = [
   "4:00 PM",
 ];
 
-const providers = ["All Providers", "Dr Smith", "Dr Lee", "Dr Ross"];
-const demoPatientNames = [
-  "John Doe",
-  "Sarah Kim",
-  "Mike Johnson",
-  "Avery Johnson",
-  "Morgan Lee",
-];
+const allDoctorsFilter = "all-doctors";
 const visitTypes = ["Therapy", "Intake", "Lab review", "Follow-up"];
 
 const statusStyles: Record<AppointmentStatus, string> = {
@@ -156,8 +166,8 @@ const riskStyles: Record<RiskLevel, string> = {
 };
 
 const initialForm: AppointmentForm = {
-  patient: demoPatientNames[0],
-  provider: "Dr Smith",
+  patientId: "",
+  doctorId: "",
   date: todayKey,
   time: "2:30 PM",
   type: visitTypes[0],
@@ -166,13 +176,14 @@ const initialForm: AppointmentForm = {
 export default function SchedulingPage() {
   const activeAppointmentIdRef = React.useRef("");
   const [appointments, setAppointments] = React.useState<Appointment[]>([]);
-  const [patientNames, setPatientNames] = React.useState(demoPatientNames);
+  const [patientOptions, setPatientOptions] = React.useState<PatientOption[]>([]);
+  const [doctorOptions, setDoctorOptions] = React.useState<DoctorOption[]>([]);
   const [activeAppointmentId, setActiveAppointmentId] = React.useState("");
   const [isLoading, setIsLoading] = React.useState(true);
   const [viewMode, setViewMode] = React.useState<ViewMode>("Week");
   const [displayMode, setDisplayMode] = React.useState<DisplayMode>("Calendar");
   const [selectedDateKey, setSelectedDateKey] = React.useState(todayKey);
-  const [providerFilter, setProviderFilter] = React.useState("All Providers");
+  const [doctorFilter, setDoctorFilter] = React.useState(allDoctorsFilter);
   const [newDialogOpen, setNewDialogOpen] = React.useState(false);
   const [newForm, setNewForm] = React.useState<AppointmentForm>(initialForm);
 
@@ -224,16 +235,38 @@ export default function SchedulingPage() {
 
   React.useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, "patients"), (snapshot) => {
-      const firebaseNames = snapshot.docs
-        .map((snapshotDoc) => getString(snapshotDoc.data().fullName))
-        .filter(Boolean);
-      const nextNames = Array.from(new Set([...firebaseNames, ...demoPatientNames]));
+      const nextPatients = snapshot.docs
+        .map((snapshotDoc) => toPatientOption(snapshotDoc.id, snapshotDoc.data()))
+        .sort((first, second) => first.name.localeCompare(second.name));
 
-      setPatientNames(nextNames);
+      setPatientOptions(nextPatients);
       setNewForm((current) =>
-        nextNames.includes(current.patient)
+        nextPatients.some((patient) => patient.id === current.patientId)
           ? current
-          : { ...current, patient: nextNames[0] ?? demoPatientNames[0] },
+          : { ...current, patientId: nextPatients[0]?.id ?? "" },
+      );
+    });
+
+    return unsubscribe;
+  }, []);
+
+  React.useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "doctors"), (snapshot) => {
+      const nextDoctors = snapshot.docs
+        .map((snapshotDoc) => toDoctorOption(snapshotDoc.id, snapshotDoc.data()))
+        .sort((first, second) => first.name.localeCompare(second.name));
+
+      setDoctorOptions(nextDoctors);
+      setNewForm((current) =>
+        nextDoctors.some((doctor) => doctor.id === current.doctorId)
+          ? current
+          : { ...current, doctorId: nextDoctors[0]?.id ?? "" },
+      );
+      setDoctorFilter((current) =>
+        current === allDoctorsFilter ||
+        nextDoctors.some((doctor) => doctor.id === current)
+          ? current
+          : allDoctorsFilter,
       );
     });
 
@@ -241,9 +274,15 @@ export default function SchedulingPage() {
   }, []);
 
   const visibleAppointments = appointments.filter(
-    (appointment) =>
-      providerFilter === "All Providers" ||
-      appointment.provider === providerFilter,
+    (appointment) => {
+      if (doctorFilter === allDoctorsFilter) return true;
+
+      const doctor = doctorOptions.find((item) => item.id === doctorFilter);
+      return (
+        appointment.doctorId === doctorFilter ||
+        Boolean(doctor && appointment.provider === doctor.name)
+      );
+    },
   );
   const activeAppointment =
     appointments.find((appointment) => appointment.id === activeAppointmentId) ??
@@ -295,6 +334,20 @@ export default function SchedulingPage() {
   }
 
   async function createAppointment() {
+    const selectedPatient = patientOptions.find(
+      (patient) => patient.id === newForm.patientId,
+    );
+    const selectedDoctor = doctorOptions.find(
+      (doctor) => doctor.id === newForm.doctorId,
+    );
+
+    if (!selectedPatient || !selectedDoctor) {
+      toast.error("Patient and doctor are required", {
+        description: "Create or select a real patient and doctor first.",
+      });
+      return;
+    }
+
     if (isBeforeTodayKey(newForm.date)) {
       toast.error("Past dates cannot be booked", {
         description: "Choose today or a future date for this appointment.",
@@ -304,17 +357,32 @@ export default function SchedulingPage() {
 
     const day = getCalendarDay(newForm.date);
 
-    if (hasConflict(appointments, newForm.provider, day.dateKey, newForm.time)) {
+    if (
+      hasConflict(
+        appointments,
+        selectedDoctor.id,
+        selectedDoctor.name,
+        day.dateKey,
+        newForm.time,
+      )
+    ) {
       toast.error("Scheduling conflict", {
-        description: `${newForm.provider} already has an appointment at ${newForm.time} on ${day.label}.`,
+        description: `${selectedDoctor.name} already has an appointment at ${newForm.time} on ${day.label}.`,
       });
       return;
     }
 
     try {
-      const createdAppointment = await addDoc(collection(db, "appointments"), {
-        patient: newForm.patient,
-        provider: newForm.provider,
+      const batch = writeBatch(db);
+      const appointmentRef = doc(collection(db, "appointments"));
+
+      batch.set(appointmentRef, {
+        patientId: selectedPatient.id,
+        patientName: selectedPatient.name,
+        patient: selectedPatient.name,
+        doctorId: selectedDoctor.id,
+        doctorName: selectedDoctor.name,
+        provider: selectedDoctor.name,
         day: day.label,
         date: day.dayNumber,
         dateKey: day.dateKey,
@@ -324,12 +392,9 @@ export default function SchedulingPage() {
         duration: "50 min",
         type: newForm.type,
         status: "Pending",
-        risk: newForm.patient === "Mike Johnson" ? "High" : "Medium",
-        reason: "New appointment request",
-        billing:
-          newForm.patient === "Sarah Kim"
-            ? "Insurance verification incomplete"
-            : "Insurance verified",
+        risk: selectedPatient.risk,
+        reason: selectedPatient.reason,
+        billing: selectedPatient.billing,
         notes: "Not started",
         message: "New appointment created.",
         createdBy: auth.currentUser?.uid ?? null,
@@ -338,11 +403,21 @@ export default function SchedulingPage() {
         updatedAt: serverTimestamp(),
       });
 
-      setActiveAppointmentId(createdAppointment.id);
+      batch.update(doc(db, "patients", selectedPatient.id), {
+        doctorId: selectedDoctor.id,
+        doctorName: selectedDoctor.name,
+        provider: selectedDoctor.name,
+        nextAppointment: `${formatShortMonthDay(day.dateKey)}, ${newForm.time}`,
+        updatedAt: serverTimestamp(),
+      });
+
+      await batch.commit();
+
+      setActiveAppointmentId(appointmentRef.id);
       setSelectedDateKey(day.dateKey);
       setNewDialogOpen(false);
       toast.success("Appointment scheduled", {
-        description: `${newForm.patient} was added to ${formatFullDate(day.dateKey)}.`,
+        description: `${selectedPatient.name} was added to ${selectedDoctor.name}'s schedule.`,
       });
     } catch {
       toast.error("Appointment was not created", {
@@ -405,6 +480,17 @@ export default function SchedulingPage() {
       return;
     }
 
+    const selectedDoctor = doctorOptions.find(
+      (doctor) => doctor.id === form.doctorId,
+    );
+
+    if (!selectedDoctor) {
+      toast.error("Doctor is required", {
+        description: "Select a real doctor before saving the reschedule.",
+      });
+      return;
+    }
+
     if (isBeforeTodayKey(form.date)) {
       toast.error("Past dates cannot be booked", {
         description: "Choose today or a future date for this appointment.",
@@ -417,21 +503,26 @@ export default function SchedulingPage() {
     if (
       hasConflict(
         appointments,
-        form.provider,
+        selectedDoctor.id,
+        selectedDoctor.name,
         day.dateKey,
         form.time,
         activeAppointment.id,
       )
     ) {
       toast.error("Scheduling conflict", {
-        description: `${form.provider} already has an appointment at ${form.time} on ${day.label}.`,
+        description: `${selectedDoctor.name} already has an appointment at ${form.time} on ${day.label}.`,
       });
       return;
     }
 
     try {
-      await updateDoc(doc(db, "appointments", activeAppointment.id), {
-        provider: form.provider,
+      const batch = writeBatch(db);
+
+      batch.update(doc(db, "appointments", activeAppointment.id), {
+        doctorId: selectedDoctor.id,
+        doctorName: selectedDoctor.name,
+        provider: selectedDoctor.name,
         day: day.label,
         date: day.dayNumber,
         dateKey: day.dateKey,
@@ -443,6 +534,18 @@ export default function SchedulingPage() {
         message: "Appointment rescheduled. Confirmation needed.",
         updatedAt: serverTimestamp(),
       });
+
+      if (activeAppointment.patientId) {
+        batch.update(doc(db, "patients", activeAppointment.patientId), {
+          doctorId: selectedDoctor.id,
+          doctorName: selectedDoctor.name,
+          provider: selectedDoctor.name,
+          nextAppointment: `${formatShortMonthDay(day.dateKey)}, ${form.time}`,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      await batch.commit();
 
       toast.success("Appointment rescheduled", {
         description: `${activeAppointment.patient} moved to ${formatFullDate(day.dateKey)} at ${form.time}.`,
@@ -463,7 +566,7 @@ export default function SchedulingPage() {
             Scheduling Dashboard
           </h2>
           <p className="text-muted-foreground text-sm">
-            Calendar-first scheduling with provider filters, appointment details,
+            Calendar-first scheduling with doctor filters, appointment details,
             and reminder automation.
           </p>
         </div>
@@ -472,7 +575,8 @@ export default function SchedulingPage() {
             open={newDialogOpen}
             onOpenChange={setNewDialogOpen}
             form={newForm}
-            patientNames={patientNames}
+            patientOptions={patientOptions}
+            doctorOptions={doctorOptions}
             onChange={updateNewForm}
             onCreate={createAppointment}
           />
@@ -511,14 +615,15 @@ export default function SchedulingPage() {
           <Button variant="outline" size="icon" onClick={() => moveVisibleDate(1)}>
             <IconChevronRight />
           </Button>
-          <Select value={providerFilter} onValueChange={setProviderFilter}>
+          <Select value={doctorFilter} onValueChange={setDoctorFilter}>
             <SelectTrigger className="w-44">
-              <SelectValue placeholder="Provider" />
+              <SelectValue placeholder="Doctor" />
             </SelectTrigger>
             <SelectContent>
-              {providers.map((provider) => (
-                <SelectItem key={provider} value={provider}>
-                  {provider}
+              <SelectItem value={allDoctorsFilter}>All Doctors</SelectItem>
+              {doctorOptions.map((doctor) => (
+                <SelectItem key={doctor.id} value={doctor.id}>
+                  {doctor.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -615,7 +720,7 @@ export default function SchedulingPage() {
         {activeAppointment ? (
           <AppointmentDetailPanel
             appointment={activeAppointment}
-            patientNames={patientNames}
+            doctorOptions={doctorOptions}
             onConfirm={() => updateStatus("Confirmed")}
             onCancel={() => updateStatus("Cancelled")}
             onReminder={() => sendReminder(activeAppointment)}
@@ -804,7 +909,7 @@ function AppointmentTable({
               <TableHead>Patient</TableHead>
               <TableHead>Date</TableHead>
               <TableHead>Time</TableHead>
-              <TableHead>Provider</TableHead>
+              <TableHead>Doctor</TableHead>
               <TableHead>Type</TableHead>
               <TableHead>Status</TableHead>
             </TableRow>
@@ -1096,14 +1201,14 @@ function MiniCalendar({
 
 function AppointmentDetailPanel({
   appointment,
-  patientNames,
+  doctorOptions,
   onConfirm,
   onCancel,
   onReminder,
   onReschedule,
 }: {
   appointment: Appointment;
-  patientNames: string[];
+  doctorOptions: DoctorOption[];
   onConfirm: () => void;
   onCancel: () => void;
   onReminder: () => void;
@@ -1134,13 +1239,13 @@ function AppointmentDetailPanel({
         <DetailRow label="Time" value={appointment.time} />
         <DetailRow label="Duration" value={appointment.duration} />
         <DetailRow label="Appointment type" value={appointment.type} />
-        <DetailRow label="Provider" value={appointment.provider} />
+        <DetailRow label="Doctor" value={appointment.provider} />
       </div>
       <div className="mt-5 grid grid-cols-2 gap-2">
         <Button onClick={onConfirm}>Confirm</Button>
         <RescheduleDialog
           appointment={appointment}
-          patientNames={patientNames}
+          doctorOptions={doctorOptions}
           onReschedule={onReschedule}
         />
         <Button variant="outline" onClick={onCancel}>
@@ -1181,21 +1286,23 @@ function NewAppointmentDialog({
   open,
   onOpenChange,
   form,
-  patientNames,
+  patientOptions,
+  doctorOptions,
   onChange,
   onCreate,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   form: AppointmentForm;
-  patientNames: string[];
+  patientOptions: PatientOption[];
+  doctorOptions: DoctorOption[];
   onChange: (field: keyof AppointmentForm, value: string) => void;
   onCreate: () => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
-        <Button>
+        <Button disabled={patientOptions.length === 0 || doctorOptions.length === 0}>
           <IconCalendarPlus />
           New appointment
         </Button>
@@ -1209,7 +1316,8 @@ function NewAppointmentDialog({
         </DialogHeader>
         <AppointmentFields
           form={form}
-          patientNames={patientNames}
+          patientOptions={patientOptions}
+          doctorOptions={doctorOptions}
           onChange={onChange}
         />
         <DialogFooter>
@@ -1225,17 +1333,17 @@ function NewAppointmentDialog({
 
 function RescheduleDialog({
   appointment,
-  patientNames,
+  doctorOptions,
   onReschedule,
 }: {
   appointment: Appointment;
-  patientNames: string[];
+  doctorOptions: DoctorOption[];
   onReschedule: (form: AppointmentForm) => void;
 }) {
   const [open, setOpen] = React.useState(false);
   const [form, setForm] = React.useState<AppointmentForm>({
-    patient: appointment.patient,
-    provider: appointment.provider,
+    patientId: appointment.patientId,
+    doctorId: appointment.doctorId,
     date: appointment.dateKey,
     time: appointment.time,
     type: appointment.type,
@@ -1243,8 +1351,8 @@ function RescheduleDialog({
 
   function resetForm() {
     setForm({
-      patient: appointment.patient,
-      provider: appointment.provider,
+      patientId: appointment.patientId,
+      doctorId: appointment.doctorId,
       date: appointment.dateKey,
       time: appointment.time,
       type: appointment.type,
@@ -1273,13 +1381,22 @@ function RescheduleDialog({
         <DialogHeader>
           <DialogTitle>Reschedule appointment</DialogTitle>
           <DialogDescription>
-            Move {appointment.patient} to a new date, provider, time, or visit
+            Move {appointment.patient} to a new date, doctor, time, or visit
             type.
           </DialogDescription>
         </DialogHeader>
         <AppointmentFields
           form={form}
-          patientNames={patientNames}
+          patientOptions={[
+            {
+              id: appointment.patientId,
+              name: appointment.patient,
+              risk: appointment.risk,
+              reason: appointment.reason,
+              billing: appointment.billing,
+            },
+          ]}
+          doctorOptions={doctorOptions}
           onChange={updateField}
           patientDisabled
         />
@@ -1303,12 +1420,14 @@ function RescheduleDialog({
 
 function AppointmentFields({
   form,
-  patientNames,
+  patientOptions,
+  doctorOptions,
   onChange,
   patientDisabled = false,
 }: {
   form: AppointmentForm;
-  patientNames: string[];
+  patientOptions: PatientOption[];
+  doctorOptions: DoctorOption[];
   onChange: (field: keyof AppointmentForm, value: string) => void;
   patientDisabled?: boolean;
 }) {
@@ -1316,18 +1435,22 @@ function AppointmentFields({
     <div className="grid gap-4">
       <SelectField
         label="Patient"
-        value={form.patient}
-        onChange={(value) => onChange("patient", value)}
-        items={patientNames.map((name) => ({ value: name, label: name }))}
+        value={form.patientId}
+        onChange={(value) => onChange("patientId", value)}
+        items={patientOptions.map((patient) => ({
+          value: patient.id,
+          label: patient.name,
+        }))}
         disabled={patientDisabled}
       />
       <SelectField
-        label="Provider"
-        value={form.provider}
-        onChange={(value) => onChange("provider", value)}
-        items={providers
-          .filter((item) => item !== "All Providers")
-          .map((provider) => ({ value: provider, label: provider }))}
+        label="Doctor"
+        value={form.doctorId}
+        onChange={(value) => onChange("doctorId", value)}
+        items={doctorOptions.map((doctor) => ({
+          value: doctor.id,
+          label: `${doctor.name} · ${doctor.specialty}`,
+        }))}
       />
       <div className="grid gap-2">
         <Label htmlFor="appointment-date">Date</Label>
@@ -1394,11 +1517,19 @@ function toAppointment(id: string, data: Record<string, unknown>): Appointment {
   const dateKey = getAppointmentDateKey(data);
   const calendarDay = getCalendarDay(dateKey);
   const day = getString(data.day, calendarDay.label);
+  const patientName =
+    getString(data.patientName, "") ||
+    getString(data.patient, "Unnamed patient");
+  const doctorName =
+    getString(data.doctorName, "") ||
+    getString(data.provider, "Unassigned");
 
   return {
     id,
-    patient: getString(data.patient, "Unnamed patient"),
-    provider: getString(data.provider, "Unassigned"),
+    patientId: getString(data.patientId, "") || `legacy-patient-${id}`,
+    patient: patientName,
+    doctorId: getString(data.doctorId, ""),
+    provider: doctorName,
     day,
     date: calendarDay.dayNumber,
     dateKey,
@@ -1417,7 +1548,8 @@ function toAppointment(id: string, data: Record<string, unknown>): Appointment {
 
 function hasConflict(
   appointments: Appointment[],
-  provider: string,
+  doctorId: string,
+  doctorName: string,
   dateKey: string,
   time: string,
   ignoredId?: string,
@@ -1426,10 +1558,46 @@ function hasConflict(
     (appointment) =>
       appointment.id !== ignoredId &&
       appointment.status !== "Cancelled" &&
-      appointment.provider === provider &&
+      (appointment.doctorId === doctorId ||
+        (!appointment.doctorId && appointment.provider === doctorName)) &&
       appointment.dateKey === dateKey &&
       appointment.time === time,
   );
+}
+
+function toPatientOption(id: string, data: Record<string, unknown>): PatientOption {
+  const name =
+    getString(data.fullName, "") ||
+    getString(data.name, "") ||
+    getString(data.patientName, "Unnamed patient");
+  const insuranceStatus = getString(data.insuranceStatus, "");
+  const insuranceProvider =
+    getString(data.insuranceProvider, "") || getString(data.insurancePlan, "");
+  const billing =
+    insuranceStatus === "Verified"
+      ? "Insurance verified"
+      : insuranceProvider
+        ? "Insurance verification incomplete"
+        : "Insurance information missing";
+
+  return {
+    id,
+    name,
+    risk: getRisk(data.risk ?? data.riskLevel),
+    reason:
+      getString(data.reason, "") ||
+      getString(data.reasonForVisit, "New appointment request"),
+    billing,
+  };
+}
+
+function toDoctorOption(id: string, data: Record<string, unknown>): DoctorOption {
+  return {
+    id,
+    name: getString(data.name, "Unnamed doctor"),
+    specialty: getString(data.specialty, "Care"),
+    status: getString(data.status, "Available"),
+  };
 }
 
 function getAppointmentDateKey(data: Record<string, unknown>) {
